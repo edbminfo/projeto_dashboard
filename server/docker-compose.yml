@@ -1,0 +1,40 @@
+version: "3.7"
+
+services:
+  ## --------------------------- BANCO DE DADOS (POSTGRES) --------------------------- ##
+  db-dashboard:
+    image: postgres:15-alpine
+    volumes:
+      # Persistência dos dados do banco no servidor
+      - ./pgdata:/var/lib/postgresql/data
+
+    environment:
+      - POSTGRES_USER=admin_dash
+      - POSTGRES_PASSWORD=SuaSenhaSeguraDoBanco123 # <--- MUDE AQUI
+      - POSTGRES_DB=dashboard_multitenant
+    ports:
+      - "5411:5432"            
+
+
+  ## --------------------------- API PYTHON (FASTAPI) --------------------------- ##
+  api-dashboard:
+    # Nome da imagem que você vai buildar. 
+    # Exemplo: docker build -t edkaba/api-dash:v1 .
+    image: edkaba/api-dash:v1 
+    build: .
+
+    depends_on:
+      - db-dashboard
+    environment:
+      # Configurações para a API conectar no banco acima
+      - DB_HOST=db-dashboard
+      - DB_NAME=dashboard_multitenant
+      - DB_USER=admin_dash
+      - DB_PASS=SuaSenhaSeguraDoBanco123 # <--- MESMA SENHA DO BANCO
+      # Senha Mestra para criar clientes na rota /api/admin/criar-cliente
+      - SENHA_ADMIN_SISTEMA=SenhaParaCriarNovosClientes
+    ports:
+      - "8000:8000"        
+
+
+## --------------------------- REDES --------------------------- ##
