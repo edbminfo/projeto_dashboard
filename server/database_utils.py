@@ -20,25 +20,49 @@ def get_db_connection():
 
 def get_sql_novo_cliente(nome_schema):
     """
-    Define a estrutura inicial. 
-    A tabela VENDAS é criada apenas com o ID, pois as outras colunas 
-    (data, total, tipo, observacoes, etc) serão criadas dinamicamente pela API.
+    Define a estrutura inicial usando os nomes originais do banco Firebird.
     """
     return f"""
     CREATE SCHEMA IF NOT EXISTS {nome_schema};
 
-    -- Tabela VENDAS (Começa Mínima -> Cresce Dinamicamente)
-    CREATE TABLE IF NOT EXISTS {nome_schema}.vendas (
+    -- 1. Tabela de Vendas (Capa)
+    CREATE TABLE IF NOT EXISTS {nome_schema}.saida (
         uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        id_original VARCHAR(50),
-        UNIQUE(id_original)
+        id_original VARCHAR(50) UNIQUE
     );
 
-    -- Tabelas de Cadastros (Mantidas fixas para garantir integridade dimensional)
+    -- 2. Tabela de Itens (Produtos da Venda - Histórico)
+    CREATE TABLE IF NOT EXISTS {nome_schema}.saida_produto (
+        uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id_original VARCHAR(50) UNIQUE,
+        id_saida VARCHAR(50),
+        id_produto VARCHAR(50)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sp_saida ON {nome_schema}.saida_produto (id_saida);
+    CREATE INDEX IF NOT EXISTS idx_sp_produto ON {nome_schema}.saida_produto (id_produto);
+
+    -- 3. Cadastro de Formas de Pagamento
+    CREATE TABLE IF NOT EXISTS {nome_schema}.formapag (
+        uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id_original VARCHAR(50) UNIQUE,
+        nome VARCHAR(200),
+        tipo VARCHAR(50)
+    );
+
+    -- 4. Vínculo Venda <-> Pagamento
+    CREATE TABLE IF NOT EXISTS {nome_schema}.saida_formapag (
+        uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id_saida VARCHAR(50),
+        id_formapag VARCHAR(50),
+        valor DECIMAL(18,4) -- Aumentado
+    );
+    CREATE INDEX IF NOT EXISTS idx_sf_saida ON {nome_schema}.saida_formapag (id_saida);
+
+    -- 5. Outros Cadastros
     CREATE TABLE IF NOT EXISTS {nome_schema}.clientes (
         uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         id_original VARCHAR(50) UNIQUE,
-        nome VARCHAR(150),
+        nome VARCHAR(200),
         cpf_cnpj VARCHAR(20),
         cidade VARCHAR(100),
         ativo VARCHAR(1)
@@ -68,9 +92,9 @@ def get_sql_novo_cliente(nome_schema):
     CREATE TABLE IF NOT EXISTS {nome_schema}.produtos (
         uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         id_original VARCHAR(50) UNIQUE,
-        nome VARCHAR(150),
-        preco_venda DECIMAL(10,2),
-        custo_total DECIMAL(10,2),
+        nome VARCHAR(200),
+        preco_venda DECIMAL(18,4), -- Aumentado de (10,2) para (18,4)
+        custo_total DECIMAL(18,4), -- Aumentado de (10,2) para (18,4)
         id_grupo VARCHAR(50),
         ativo VARCHAR(1)
     );
