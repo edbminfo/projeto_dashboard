@@ -1,40 +1,46 @@
 version: "3.7"
 
 services:
-  ## --------------------------- BANCO DE DADOS (POSTGRES) --------------------------- ##
+  ## --- SEU BANCO DE DADOS (JÁ EXISTENTE) ---
   db-dashboard:
     image: postgres:15-alpine
     volumes:
-      # Persistência dos dados do banco no servidor
       - ./pgdata:/var/lib/postgresql/data
-
     environment:
       - POSTGRES_USER=admin_dash
-      - POSTGRES_PASSWORD=SuaSenhaSeguraDoBanco123 # <--- MUDE AQUI
+      - POSTGRES_PASSWORD=SuaSenhaSeguraDoBanco123
       - POSTGRES_DB=dashboard_multitenant
     ports:
-      - "5411:5432"            
+      - "5411:5432"
 
-
-  ## --------------------------- API PYTHON (FASTAPI) --------------------------- ##
+  ## --- SUA API PYTHON (JÁ EXISTENTE) ---
   api-dashboard:
-    # Nome da imagem que você vai buildar. 
-    # Exemplo: docker build -t edkaba/api-dash:v1 .
     image: edkaba/api-dash:v1 
     build: .
-
     depends_on:
       - db-dashboard
     environment:
-      # Configurações para a API conectar no banco acima
       - DB_HOST=db-dashboard
       - DB_NAME=dashboard_multitenant
       - DB_USER=admin_dash
-      - DB_PASS=SuaSenhaSeguraDoBanco123 # <--- MESMA SENHA DO BANCO
-      # Senha Mestra para criar clientes na rota /api/admin/criar-cliente
+      - DB_PASS=SuaSenhaSeguraDoBanco123
       - SENHA_ADMIN_SISTEMA=SenhaParaCriarNovosClientes
     ports:
-      - "8000:8000"        
+      - "8000:8000"
 
-
-## --------------------------- REDES --------------------------- ##
+  ## --- NOVO FRONT-END NODE.JS ---
+  front-dashboard:
+    build: ../web-front  # <--- Caminho para a pasta onde está o Dockerfile do Node
+    depends_on:
+      - db-dashboard
+    environment:
+      # Conecta no banco usando o NOME DO SERVIÇO (db-dashboard) e a PORTA INTERNA (5432)
+      - DB_HOST=db-dashboard 
+      - DB_PORT=5432
+      - DB_USER=admin_dash
+      - DB_PASS=SuaSenhaSeguraDoBanco123
+      - DB_NAME=dashboard_multitenant
+      # Senha para o Webhook de Criar Usuário
+      - SENHA_ADMIN_SISTEMA=SenhaParaCriarNovosClientes 
+    ports:
+      - "3000:3000"

@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>BM Dashboard</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        body { 
+            background-color: #f0f2f5; 
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            padding-bottom: 40px;
+        }
+
+        /* --- HEADER AZUL --- */
+        .bm-header {
+            background-color: #1a73e8; /* Azul estilo Facebook/Google */
+            color: white;
+            padding: 15px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+        }
+
+        /* --- FILTROS RESPONSIVOS --- */
+        .filter-bar { 
+            background: white; 
+            padding: 15px; 
+            border-bottom: 1px solid #ddd; 
+            margin-bottom: 20px;
+        }
+
+        .filter-btn {
+            background: #f8f9fa; 
+            border: 1px solid #dee2e6; 
+            color: #495057; 
+            width: 100%;
+            text-align: left; 
+            padding: 10px 15px; 
+            border-radius: 8px; 
+            display: flex;
+            justify-content: space-between; 
+            align-items: center; 
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .filter-btn:hover { background: #e9ecef; border-color: #ced4da; }
+
+        /* No PC, coloca os filtros lado a lado */
+        @media (min-width: 768px) {
+            .filter-container {
+                display: flex;
+                gap: 15px;
+            }
+            .dropdown { flex: 1; } /* Cada botão ocupa metade do espaço */
+        }
+        /* No Celular, adiciona margem entre os botões empilhados */
+        @media (max-width: 767px) {
+            .dropdown + .dropdown { margin-top: 10px; }
+        }
+
+        /* --- CARDS METRICS --- */
+        .card-metric {
+            background: linear-gradient(135deg, #0099e6 0%, #007bb8 100%); /* Degradê sutil */
+            color: white;
+            border-radius: 12px; /* Cantos mais arredondados */
+            padding: 20px 15px;
+            text-align: center;
+            height: 100%;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .card-metric:hover { transform: translateY(-3px); } /* Efeito ao passar o mouse no PC */
+
+        .card-title { 
+            font-size: 0.9rem; 
+            font-weight: 500; 
+            opacity: 0.9; 
+            margin-bottom: 5px; 
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .card-value { 
+            font-size: 1.6rem; 
+            font-weight: 700; 
+            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        /* Ajuste de fonte para telas muito pequenas */
+        @media (max-width: 380px) {
+            .card-value { font-size: 1.3rem; }
+            .card-title { font-size: 0.8rem; }
+        }
+
+        /* --- MENU LATERAL & RODAPÉ --- */
+        .menu-item { 
+            padding: 16px 20px; 
+            border-bottom: 1px solid #f0f0f0; 
+            color: #333; 
+            text-decoration: none; 
+            display: block; 
+            font-size: 16px;
+        }
+        .menu-item:hover { background-color: #f8f9fa; color: #1a73e8; }
+        .menu-item i { width: 25px; text-align: center; color: #666; }
+        .menu-item:hover i { color: #1a73e8; }
+
+        .footer-date { text-align: center; color: #999; font-size: 13px; margin-top: 30px; }
+    </style>
+</head>
+<body>
+
+    <div class="bm-header d-flex justify-content-between align-items-center">
+        <button class="btn text-white p-0 border-0" type="button" data-bs-toggle="offcanvas" data-bs-target="#menuLateral">
+            <i class="fas fa-bars fa-lg"></i>
+        </button>
+        
+        <h5 class="m-0 fw-bold">BM Dashboard</h5>
+        
+        <a href="javascript:location.reload()" class="btn text-white p-0 border-0">
+            <i class="fas fa-sync-alt"></i>
+        </a>
+    </div>
+
+    <div class="filter-bar">
+        <div class="container p-0 filter-container">
+            
+            <div class="dropdown">
+                <button class="filter-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <span><i class="fas fa-store me-2 text-primary"></i> 
+                        <span class="d-inline-block text-truncate" style="max-width: 200px; vertical-align: middle;">
+                            <%= nomeLoja %>
+                        </span>
+                    </span>
+                    <i class="fas fa-chevron-down text-muted small"></i>
+                </button>
+                <ul class="dropdown-menu w-100 shadow border-0 mt-1">
+                    <% todasLojas.forEach(function(loja) { %>
+                        <li>
+                            <a class="dropdown-item py-2 <%= loja.id == lojaId ? 'active' : '' %>" 
+                               href="?loja_id=<%= loja.id %>&periodo=<%= periodo %>">
+                               <%= loja.nome_fantasia %>
+                            </a>
+                        </li>
+                    <% }); %>
+                </ul>
+            </div>
+
+            <div class="dropdown">
+                <button class="filter-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <span><i class="far fa-calendar-alt me-2 text-success"></i> 
+                        <% if(periodo=='hoje') { %> Hoje 
+                        <% } else if(periodo=='ontem') { %> Ontem 
+                        <% } else if(periodo=='7dias') { %> Últimos 7 dias 
+                        <% } else if(periodo=='mes') { %> Este Mês 
+                        <% } else if(periodo=='todos') { %> Todo o Histórico 
+                        <% } else if(periodo=='personalizado') { %> <%= dIni.split('-').reverse().join('/') %> até <%= dFim.split('-').reverse().join('/') %> 
+                        <% } else { %> Hoje <% } %>
+                    </span>
+                    <i class="fas fa-chevron-down text-muted small"></i>
+                </button>
+                <ul class="dropdown-menu w-100 shadow border-0 mt-1">
+                    <li><a class="dropdown-item py-2" href="?loja_id=<%= lojaId %>&periodo=hoje">Hoje</a></li>
+                    <li><a class="dropdown-item py-2" href="?loja_id=<%= lojaId %>&periodo=ontem">Ontem</a></li>
+                    <li><a class="dropdown-item py-2" href="?loja_id=<%= lojaId %>&periodo=7dias">Últimos 7 dias</a></li>
+                    <li><a class="dropdown-item py-2" href="?loja_id=<%= lojaId %>&periodo=mes">Este Mês</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item py-2 fw-bold" href="?loja_id=<%= lojaId %>&periodo=todos">Todo o Histórico</a></li>
+                    <li><a class="dropdown-item py-2 fw-bold text-primary" href="#" data-bs-toggle="modal" data-bs-target="#modalData">Personalizado...</a></li>
+                </ul>
+            </div>
+
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="row g-3">
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Faturamento</div>
+                    <div class="card-value"><%= dados.faturamento.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) %></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Qtde Vendas</div>
+                    <div class="card-value"><%= dados.qtde_vendas %></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Ticket Médio</div>
+                    <div class="card-value"><%= dados.ticket_medio.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) %></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Itens p/ Venda</div>
+                    <div class="card-value"><%= dados.itens_por_venda.toLocaleString('pt-BR', {maximumFractionDigits: 2}) %></div>
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">CMV</div>
+                    <div class="card-value"><%= dados.cmv.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) %></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Markup</div>
+                    <div class="card-value"><%= dados.markup.toLocaleString('pt-BR', {maximumFractionDigits: 2}) %></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Lucro Bruto (R$)</div>
+                    <div class="card-value"><%= dados.lucro_bruto.toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) %></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Lucro Bruto (%)</div>
+                    <div class="card-value"><%= dados.margem.toLocaleString('pt-BR', {maximumFractionDigits: 2}) %> %</div>
+                </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Maior Venda</div>
+                    <div class="card-value"><%= parseFloat(dados.maior_venda).toLocaleString('pt-BR', {minimumFractionDigits: 2}) %></div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card-metric">
+                    <div class="card-title">Menor Venda</div>
+                    <div class="card-value"><%= parseFloat(dados.menor_venda).toLocaleString('pt-BR', {minimumFractionDigits: 2}) %></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="modalData" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">Período Personalizado</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form action="/painel" method="GET">
+                        <input type="hidden" name="loja_id" value="<%= lojaId %>">
+                        <input type="hidden" name="periodo" value="personalizado">
+                        
+                        <div class="mb-3">
+                            <label class="form-label fw-bold text-muted">Data Inicial</label>
+                            <input type="date" name="data_inicio" class="form-control form-control-lg" required value="<%= dIni %>">
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label fw-bold text-muted">Data Final</label>
+                            <input type="date" name="data_fim" class="form-control form-control-lg" required value="<%= dFim %>">
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary w-100 btn-lg shadow-sm">
+                            <i class="fas fa-filter me-2"></i> Filtrar
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer-date">
+        <i class="far fa-clock me-1"></i> Atualizado em: <%= new Date().toLocaleString('pt-BR') %>
+    </div>
+
+    <div class="offcanvas offcanvas-start" tabindex="-1" id="menuLateral">
+        <div class="offcanvas-header bg-primary text-white">
+            <h5 class="offcanvas-title fw-bold">Menu</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body p-0">
+            <div class="py-2">
+                <a href="#" class="menu-item border-top-0"><i class="fas fa-chart-line me-2"></i> Monitor de Faturamento</a>
+                <a href="#" class="menu-item"><i class="fas fa-box me-2"></i> Produtos mais Vendidos</a>
+                <a href="#" class="menu-item"><i class="fas fa-clock me-2"></i> Vendas por Hora</a>
+                <a href="#" class="menu-item"><i class="fas fa-calendar-alt me-2"></i> Vendas por Dia</a>
+                <a href="#" class="menu-item"><i class="fas fa-credit-card me-2"></i> Vendas por Pagamento</a>
+                <a href="#" class="menu-item"><i class="fas fa-tags me-2"></i> Vendas por Seção</a>
+            </div>
+            
+            <div style="border-top: 5px solid #f0f2f5;"></div>
+            
+            <div class="py-2">
+                <a href="/logout" class="menu-item text-danger"><i class="fas fa-sign-out-alt me-2"></i> Sair do Sistema</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+</body>
+</html>

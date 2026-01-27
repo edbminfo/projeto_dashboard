@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Minhas Empresas</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container">
+            <span class="navbar-brand">Olá, <%= usuario.nome %></span>
+            <a href="/logout" class="btn btn-outline-light btn-sm">Sair</a>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <h4>Selecione uma empresa para visualizar:</h4>
+        <div class="row mt-3">
+            <% if (lojas.length === 0) { %>
+                <div class="alert alert-warning">Nenhuma empresa vinculada ao seu usuário.</div>
+            <% } %>
+
+            <% lojas.forEach(function(loja) { %>
+                <div class="col-md-4 mb-3">
+                    <div class="card h-100 shadow-sm hover-shadow">
+                        <div class="card-body">
+                            <h5 class="card-title"><%= loja.nome_fantasia %></h5>
+                            <p class="card-text text-muted">CNPJ: <%= loja.cnpj %></p>
+                            
+                            <a href="/painel?loja_id=<%= loja.id %>" class="btn btn-primary w-100">
+    Acessar Dashboard
+</a>
+                        </div>
+                    </div>
+                </div>
+            <% }); %>
+        </div>
+    </div>
+</body>
+</html>

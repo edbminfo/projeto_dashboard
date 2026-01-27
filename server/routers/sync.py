@@ -1,155 +1,136 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from typing import List, Optional
 from security import validar_token
 from database_utils import get_db_connection
 
 router = APIRouter()
 
-# --- HELPER DINÂMICO ---
-def inserir_dados_dinamicos(cursor, schema_banco, tabela, dados, upsert=True):
-    if not dados: return
-    
-    # 1. ORDENAÇÃO ANTI-DEADLOCK
-    # Garante que as linhas sejam sempre acessadas na ordem do ID.
-    if upsert and 'id_original' in dados[0]:
-        dados.sort(key=lambda x: str(x.get('id_original', '')))
-    elif 'id_saida' in dados[0]:
-        dados.sort(key=lambda x: str(x.get('id_saida', '')))
+# --- MODELO PARA DELEÇÃO ---
+class DeleteVendaSchema(BaseModel):
+    id_original: str
 
-    # 2. SCHEMA EVOLUTION
-    cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema_banco}' AND table_name = '{tabela}'")
-    colunas_banco = {row[0] for row in cursor.fetchall()}
+# --- UTILS ---
+def get_existing_columns(cursor, schema, tabela):
+    cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema}' AND table_name = '{tabela}'")
+    return {row[0] for row in cursor.fetchall()}
+
+# --- UPSERT INTELIGENTE (Mantido Igual) ---
+def upsert_generico(schema: str, tabela: str, dados: List[dict]):
+    if not dados: return {"status": "vazio"}
     
-    novas_colunas = []
-    amostra = dados[0]
-    
-    for coluna, valor in amostra.items():
-        if coluna not in colunas_banco:
-            tipo_sql = "TEXT"
-            if isinstance(valor, int): tipo_sql = "BIGINT"
-            elif isinstance(valor, float): tipo_sql = "DECIMAL(18,4)"
-            novas_colunas.append(f"ADD COLUMN IF NOT EXISTS \"{coluna}\" {tipo_sql}")
-            colunas_banco.add(coluna)
-            
-    if novas_colunas:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        chaves_json = [k for k in dados[0].keys() if k not in ('id_original', 'id')]
+        cols_create = ", ".join([f"{k} TEXT" for k in chaves_json])
+        
+        sql_create = f"""
+            CREATE TABLE IF NOT EXISTS {schema}.{tabela} (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                id_original VARCHAR(50),
+                criado_em TIMESTAMP DEFAULT NOW(),
+                modificado_em TIMESTAMP DEFAULT NOW(),
+                {cols_create}
+            )
+        """
+        cursor.execute(sql_create)
+        
+        colunas_banco = get_existing_columns(cursor, schema, tabela)
+        for col in chaves_json:
+            if col not in colunas_banco:
+                cursor.execute(f"ALTER TABLE {schema}.{tabela} ADD COLUMN {col} TEXT")
+
+        if 'modificado_em' not in colunas_banco: cursor.execute(f"ALTER TABLE {schema}.{tabela} ADD COLUMN modificado_em TIMESTAMP DEFAULT NOW()")
+        if 'id_original' not in colunas_banco: cursor.execute(f"ALTER TABLE {schema}.{tabela} ADD COLUMN id_original VARCHAR(50)")
+
         try:
-            cursor.execute(f"ALTER TABLE {schema_banco}.{tabela} {', '.join(novas_colunas)};")
-        except Exception as e:
-            print(f"Erro Schema {tabela}: {e}")
+            cursor.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tabela}_id_original ON {schema}.{tabela} (id_original)")
+        except: pass
 
-    # 3. INSERÇÃO
-    for linha in dados:
-        cols = list(linha.keys())
-        vals = list(linha.values())
-        
-        cols_str = ', '.join([f'"{c}"' for c in cols])
-        placeholders = ', '.join(['%s'] * len(vals))
-        
-        if upsert and 'id_original' in cols:
-            campos_ignorar = ('id_original', 'uuid_id', 'id_saida', 'id_produto', 'id_formapag')
-            update_parts = [f'"{c}" = EXCLUDED."{c}"' for c in cols if c not in campos_ignorar]
+        for item in dados:
+            campos = [k for k in item.keys() if k != 'id'] 
+            valores = [item[k] for k in campos]
+            placeholders = ", ".join(["%s"] * len(valores))
+            cols_insert = ", ".join(campos)
+            update_set = ", ".join([f"{c} = EXCLUDED.{c}" for c in campos if c != 'id_original'])
+            if update_set: update_set += ", modificado_em = NOW()"
+            else: update_set = "modificado_em = NOW()"
             
-            if update_parts:
-                sql = f"INSERT INTO {schema_banco}.{tabela} ({cols_str}) VALUES ({placeholders}) ON CONFLICT (id_original) DO UPDATE SET {', '.join(update_parts)}"
-            else:
-                sql = f"INSERT INTO {schema_banco}.{tabela} ({cols_str}) VALUES ({placeholders}) ON CONFLICT (id_original) DO NOTHING"
-        else:
-            sql = f"INSERT INTO {schema_banco}.{tabela} ({cols_str}) VALUES ({placeholders})"
+            sql_insert = f"""
+                INSERT INTO {schema}.{tabela} ({cols_insert})
+                VALUES ({placeholders})
+                ON CONFLICT (id_original) DO UPDATE SET {update_set}
+            """
+            cursor.execute(sql_insert, valores)
             
-        cursor.execute(sql, vals)
+        conn.commit()
+        return {"status": "sucesso", "tabela": tabela, "qtd": len(dados)}
+    except Exception as e:
+        conn.rollback(); print(f"Erro Sync {tabela}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally: conn.close()
 
-# --- ROTAS DE TABELAS FATO ---
+# --- NOVA ROTA DE DELEÇÃO (LIMPEZA EM CASCATA) ---
+@router.post("/sync/deletar-venda")
+def deletar_venda(dados: DeleteVendaSchema, schema: str = Depends(validar_token)):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Apaga os filhos primeiro (Produtos e Pagamentos)
+        # Atenção: saida_produto e saida_formapag usam id_saida para vincular
+        
+        # 1. Tenta apagar itens da venda (se a tabela existir)
+        cursor.execute(f"""
+            DELETE FROM {schema}.saida_produto 
+            WHERE id_saida = %s
+        """, (dados.id_original,))
+        
+        # 2. Tenta apagar pagamentos da venda
+        cursor.execute(f"""
+            DELETE FROM {schema}.saida_formapag 
+            WHERE id_saida = %s
+        """, (dados.id_original,))
+        
+        # 3. Apaga a venda (Pai)
+        cursor.execute(f"""
+            DELETE FROM {schema}.saida 
+            WHERE id_original = %s
+        """, (dados.id_original,))
+        
+        conn.commit()
+        return {"status": "deletado", "id": dados.id_original}
+        
+    except Exception as e:
+        conn.rollback()
+        # Se a tabela não existir, não é erro grave, apenas ignora
+        if "undefined table" in str(e): return {"status": "ignorado"}
+        print(f"Erro ao deletar venda {dados.id_original}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+# --- ROTAS DE CADASTRO/MOVIMENTO ---
+@router.post("/sync/cadastros/produto")
+async def sync_produto(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "produto", await request.json())
+
+@router.post("/sync/cadastros/cliente")
+async def sync_cliente(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "cliente", await request.json())
+
+@router.post("/sync/cadastros/vendedor")
+async def sync_vendedor(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "vendedor", await request.json())
+
+@router.post("/sync/cadastros/grupo")
+async def sync_grupo(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "grupo", await request.json())
+
+@router.post("/sync/cadastros/secao")
+async def sync_secao(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "secao", await request.json())
 
 @router.post("/sync/saida")
-def receber_saida(dados: List[Dict[str, Any]], schema: str = Depends(validar_token)):
-    conn = get_db_connection(); cursor = conn.cursor()
-    try:
-        inserir_dados_dinamicos(cursor, schema, "saida", dados)
-        conn.commit()
-        return {"status": "ok"}
-    except Exception as e:
-        conn.rollback(); print(f"Erro Saida: {e}"); raise HTTPException(500, str(e))
-    finally: conn.close()
+async def sync_saida(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "saida", await request.json())
 
 @router.post("/sync/saida_produto")
-def receber_saida_produto(dados: List[Dict[str, Any]], schema: str = Depends(validar_token)):
-    conn = get_db_connection(); cursor = conn.cursor()
-    try:
-        inserir_dados_dinamicos(cursor, schema, "saida_produto", dados)
-        conn.commit()
-        return {"status": "ok"}
-    except Exception as e:
-        conn.rollback(); print(f"Erro SaidaProduto: {e}"); raise HTTPException(500, str(e))
-    finally: conn.close()
+async def sync_saida_produto(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "saida_produto", await request.json())
 
 @router.post("/sync/saida_formapag")
-def receber_saida_formapag(dados: List[Dict[str, Any]], schema: str = Depends(validar_token)):
-    conn = get_db_connection(); cursor = conn.cursor()
-    try:
-        # CORREÇÃO CRÍTICA DO ERRO 500:
-        # Extraímos os IDs e garantimos que são STRING (str) antes de enviar para o banco
-        ids_saida = sorted(list({str(d['id_saida']) for d in dados if 'id_saida' in d}))
-        
-        if ids_saida:
-            # Usamos placeholders %s para o driver tratar a string corretamente
-            placeholders = ','.join(['%s'] * len(ids_saida))
-            sql_delete = f"DELETE FROM {schema}.saida_formapag WHERE id_saida IN ({placeholders})"
-            cursor.execute(sql_delete, ids_saida)
-            
-        # Insere os novos (upsert=False pois não tem PK única simples)
-        inserir_dados_dinamicos(cursor, schema, "saida_formapag", dados, upsert=False)
-        conn.commit()
-        return {"status": "ok"}
-    except Exception as e:
-        conn.rollback(); print(f"Erro SaidaFormapag: {e}"); raise HTTPException(500, str(e))
-    finally: conn.close()
-
-# --- ROTAS DE CADASTROS (COMPLETO) ---
-
-@router.post("/sync/cadastros/{tipo}")
-def receber_cadastros(tipo: str, dados: List[Dict[str, Any]], schema: str = Depends(validar_token)):
-    conn = get_db_connection(); cursor = conn.cursor()
-    tabela_map = {
-        "cliente": "clientes", "vendedor": "vendedores", 
-        "secao": "secoes", "grupo": "grupos", 
-        "produto": "produtos", "formapag": "formapag"
-    }
-    
-    if tipo not in tabela_map: raise HTTPException(400, "Tipo inválido")
-    tabela = f"{schema}.{tabela_map[tipo]}"
-    
-    # Ordenação
-    if dados and 'id_original' in dados[0]:
-        dados.sort(key=lambda x: str(x.get('id_original', '')))
-    
-    try:
-        if tipo == "cliente":
-            sql = f"INSERT INTO {tabela} (id_original, nome, cpf_cnpj, cidade, ativo) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (id_original) DO UPDATE SET nome=EXCLUDED.nome, cpf_cnpj=EXCLUDED.cpf_cnpj, cidade=EXCLUDED.cidade, ativo=EXCLUDED.ativo"
-            for d in dados: cursor.execute(sql, (d.get('id_original'), d.get('nome'), d.get('cpf_cnpj'), d.get('cidade'), d.get('ativo')))
-        
-        elif tipo == "produto":
-            sql = f"INSERT INTO {tabela} (id_original, nome, preco_venda, custo_total, id_grupo, ativo) VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (id_original) DO UPDATE SET nome=EXCLUDED.nome, preco_venda=EXCLUDED.preco_venda, custo_total=EXCLUDED.custo_total, id_grupo=EXCLUDED.id_grupo, ativo=EXCLUDED.ativo"
-            for d in dados: cursor.execute(sql, (d.get('id_original'), d.get('nome'), d.get('preco_venda'), d.get('custo_total'), str(d.get('id_grupo')), d.get('ativo')))
-        
-        elif tipo == "formapag":
-            sql = f"INSERT INTO {tabela} (id_original, nome, tipo) VALUES (%s, %s, %s) ON CONFLICT (id_original) DO UPDATE SET nome=EXCLUDED.nome, tipo=EXCLUDED.tipo"
-            for d in dados: cursor.execute(sql, (d.get('id_original'), d.get('nome'), str(d.get('tipo'))))
-
-        elif tipo == "vendedor":
-            sql = f"INSERT INTO {tabela} (id_original, nome, comissao, ativo) VALUES (%s, %s, %s, %s) ON CONFLICT (id_original) DO UPDATE SET nome=EXCLUDED.nome, comissao=EXCLUDED.comissao"
-            for d in dados: cursor.execute(sql, (d.get('id_original'), d.get('nome'), d.get('comissao'), d.get('ativo')))
-        
-        elif tipo == "secao":
-            sql = f"INSERT INTO {tabela} (id_original, nome) VALUES (%s, %s) ON CONFLICT (id_original) DO UPDATE SET nome=EXCLUDED.nome"
-            for d in dados: cursor.execute(sql, (d.get('id_original'), d.get('nome')))
-        
-        elif tipo == "grupo":
-            sql = f"INSERT INTO {tabela} (id_original, nome, id_secao) VALUES (%s, %s, %s) ON CONFLICT (id_original) DO UPDATE SET nome=EXCLUDED.nome, id_secao=EXCLUDED.id_secao"
-            for d in dados: cursor.execute(sql, (d.get('id_original'), d.get('nome'), str(d.get('id_secao'))))
-
-        conn.commit()
-        return {"status": "ok"}
-    except Exception as e:
-        conn.rollback(); raise HTTPException(500, str(e))
-    finally: conn.close()
+async def sync_saida_formapag(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "saida_formapag", await request.json())

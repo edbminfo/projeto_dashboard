@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Validar Acesso</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        body {
+            background: linear-gradient(135deg, #1a73e8 0%, #0d47a1 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            padding: 20px;
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            overflow: hidden;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+
+        .login-header {
+            background-color: #fff;
+            padding: 40px 30px 10px 30px;
+        }
+
+        .icon-box {
+            width: 80px;
+            height: 80px;
+            background-color: #e8f0fe;
+            color: #1a73e8;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            margin: 0 auto 20px auto;
+        }
+
+        .login-body {
+            padding: 20px 30px 40px 30px;
+        }
+
+        /* Estilo do Input de Token */
+        .input-token {
+            font-size: 32px;
+            letter-spacing: 12px;
+            text-align: center;
+            font-weight: bold;
+            color: #333;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+        }
+
+        .input-token:focus {
+            border-color: #1a73e8;
+            box-shadow: 0 0 0 4px rgba(26, 115, 232, 0.1);
+            background-color: #fff;
+            outline: none;
+        }
+
+        .btn-verify {
+            background: #1a73e8;
+            border: none;
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            width: 100%;
+            margin-top: 20px;
+            transition: background 0.2s;
+        }
+        
+        .btn-verify:hover { background: #155db5; }
+
+        .fade-in { animation: fadeIn 0.5s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <div class="login-card fade-in">
+        <div class="login-header">
+            <div class="icon-box">
+                <i class="fas fa-shield-alt"></i>
+            </div>
+            <h4 class="fw-bold text-dark">Verificação de Segurança</h4>
+            <p class="text-muted mb-1">Enviamos um código para:</p>
+            <div class="badge bg-light text-primary border px-3 py-2 rounded-pill fs-6">
+                <i class="fab fa-whatsapp me-1"></i> <%= telefone %>
+            </div>
+        </div>
+
+        <div class="login-body">
+            <% if (erro) { %>
+                <div class="alert alert-danger mt-3 py-2"><%= erro %></div>
+            <% } %>
+
+            <form action="/auth/validar" method="POST">
+                <div class="mt-4">
+                    <label class="form-label text-muted small fw-bold">DIGITE O CÓDIGO DE 6 DÍGITOS</label>
+                    <input type="tel" name="codigo" 
+                           class="form-control input-token" 
+                           maxlength="6" 
+                           placeholder="000000" 
+                           autofocus required 
+                           oninput="this.value = this.value.replace(/[^0-9]/g, '')">
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-verify text-white shadow-sm">
+                    Validar Acesso
+                </button>
+            </form>
+
+            <div class="mt-4">
+                <a href="/login" class="text-decoration-none text-muted small">
+                    <i class="fas fa-arrow-left me-1"></i> Voltar / Alterar número
+                </a>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
