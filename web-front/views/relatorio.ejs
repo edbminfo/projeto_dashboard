@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+    <title><%= tituloRelatorio %> - BM Dashboard</title>
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', sans-serif; padding-bottom: 40px; }
+        .bm-header { background-color: #1a73e8; color: white; padding: 15px; position: sticky; top: 0; z-index: 1000; }
+        .filter-bar { background: white; padding: 15px; border-bottom: 1px solid #ddd; margin-bottom: 20px; }
+        .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; margin-bottom: 20px; }
+        .chart-card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 20px; position: relative; height: 400px; display: flex; justify-content: center; }
+        .progress-bar-custom { background-color: #e8f0fe; border-radius: 4px; height: 8px; margin-top: 5px; overflow: hidden; }
+        .progress-fill { background-color: #1a73e8; height: 100%; border-radius: 4px; }
+        .menu-item { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; color: #333; text-decoration: none; display: block; }
+        .menu-item:hover { background: #f8f9fa; color: #1a73e8; }
+        .filter-btn { background: #f8f9fa; border: 1px solid #dee2e6; width: 100%; padding: 10px 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
+    </style>
+</head>
+<body>
+
+    <div class="bm-header d-flex justify-content-between align-items-center">
+        <button class="btn text-white p-0" type="button" data-bs-toggle="offcanvas" data-bs-target="#menuLateral"><i class="fas fa-bars fa-lg"></i></button>
+        <h5 class="m-0 fw-bold"><%= tituloRelatorio %></h5>
+        <a href="javascript:location.reload()" class="btn text-white p-0"><i class="fas fa-sync-alt"></i></a>
+    </div>
+
+    <div class="filter-bar">
+        <div class="container p-0 d-md-flex gap-3">
+            <div class="dropdown flex-fill mb-2 mb-md-0">
+                <button class="filter-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <span><i class="fas fa-store me-2 text-primary"></i> <%= nomeLoja %></span>
+                    <i class="fas fa-chevron-down text-muted small"></i>
+                </button>
+                <ul class="dropdown-menu w-100 mt-1">
+                    <% todasLojas.forEach(function(loja) { %>
+                        <li><a class="dropdown-item py-2" href="?loja_id=<%= loja.id %>&periodo=<%= periodo %>"><%= loja.nome_fantasia %></a></li>
+                    <% }); %>
+                </ul>
+            </div>
+            <div class="dropdown flex-fill">
+                <button class="filter-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                    <span><i class="far fa-calendar-alt me-2 text-success"></i> 
+                        <% if(periodo=='hoje') { %> Hoje 
+                        <% } else if(periodo=='ontem') { %> Ontem 
+                        <% } else if(periodo=='7dias') { %> Últimos 7 dias 
+                        <% } else if(periodo=='mes') { %> Este Mês 
+                        <% } else if(periodo=='todos') { %> Todo o Histórico 
+                        <% } else { %> <%= dIni.split('-').reverse().join('/') %> até <%= dFim.split('-').reverse().join('/') %> <% } %>
+                    </span>
+                    <i class="fas fa-chevron-down text-muted small"></i>
+                </button>
+                <ul class="dropdown-menu w-100 mt-1">
+                    <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=hoje">Hoje</a></li>
+                    <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=ontem">Ontem</a></li>
+                    <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=7dias">Últimos 7 dias</a></li>
+                    <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=mes">Este Mês</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item fw-bold" href="?loja_id=<%= lojaId %>&periodo=todos">Todo o Histórico</a></li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        
+        <% if (dados.length > 0) { %>
+        <div class="chart-card">
+            <canvas id="graficoRelatorio"></canvas>
+        </div>
+        <% } %>
+
+        <div class="table-card">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="bg-light text-secondary">
+                        <tr>
+                            <th class="ps-4 py-3" style="width: 50%;">Descrição</th>
+                            <th class="text-end py-3">Valor (R$)</th>
+                            <th class="text-end pe-4 py-3">Qtde</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <% if (dados.length === 0) { %>
+                            <tr><td colspan="3" class="text-center py-5 text-muted">Nenhum dado encontrado neste período.</td></tr>
+                        <% } else { 
+                            let maxVal = Math.max(...dados.map(d => d.total));
+                        %>
+                            <% dados.forEach(function(item) { %>
+                                <tr>
+                                    <td class="ps-4 py-3">
+                                        <div class="fw-bold text-dark"><%= item.nome %></div>
+                                        <div class="progress-bar-custom">
+                                            <div class="progress-fill" style="width: <%= (item.total / maxVal * 100) %>%"></div>
+                                        </div>
+                                    </td>
+                                    <td class="text-end fw-bold text-primary">
+                                        <%= item.total.toLocaleString('pt-BR', {minimumFractionDigits: 2}) %>
+                                    </td>
+                                    <td class="text-end pe-4 text-muted">
+                                        <%= item.qtd %>
+                                    </td>
+                                </tr>
+                            <% }); %>
+                        <% } %>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="text-center mt-4 mb-3">
+            <a href="/painel?loja_id=<%= lojaId %>" class="btn btn-outline-primary rounded-pill px-4">
+                <i class="fas fa-arrow-left me-2"></i> Voltar ao Painel
+            </a>
+        </div>
+    </div>
+
+    <div class="offcanvas offcanvas-start" tabindex="-1" id="menuLateral">
+        <div class="offcanvas-header bg-primary text-white">
+            <h5 class="offcanvas-title fw-bold">Menu</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+        </div>
+        <div class="offcanvas-body p-0">
+            <% const qParams = `loja_id=${lojaId}&periodo=${periodo}&data_inicio=${dIni}&data_fim=${dFim}`; %>
+            <div class="py-2">
+                <a href="/painel?<%= qParams %>" class="menu-item"><i class="fas fa-chart-line me-2"></i> Monitor de Faturamento</a>
+                <a href="/relatorios/produto?<%= qParams %>" class="menu-item"><i class="fas fa-box me-2"></i> Produtos mais Vendidos</a>
+                <a href="/relatorios/hora?<%= qParams %>" class="menu-item"><i class="fas fa-clock me-2"></i> Vendas por Hora</a>
+                <a href="/relatorios/dia?<%= qParams %>" class="menu-item"><i class="fas fa-calendar-alt me-2"></i> Vendas por Dia</a>
+                <a href="/relatorios/pagamento?<%= qParams %>" class="menu-item"><i class="fas fa-credit-card me-2"></i> Vendas por Pagamento</a>
+                <a href="/relatorios/secao?<%= qParams %>" class="menu-item"><i class="fas fa-tags me-2"></i> Vendas por Seção</a>
+                <a href="/relatorios/grupo?<%= qParams %>" class="menu-item"><i class="fas fa-layer-group me-2"></i> Vendas por Grupo</a>
+                <a href="/relatorios/fabricante?<%= qParams %>" class="menu-item"><i class="fas fa-industry me-2"></i> Vendas por Fabricante</a>
+                <a href="/relatorios/terminal?<%= qParams %>" class="menu-item"><i class="fas fa-desktop me-2"></i> Vendas por Terminal</a>
+                <a href="/relatorios/usuario?<%= qParams %>" class="menu-item"><i class="fas fa-user-tag me-2"></i> Vendas por Usuário</a>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <% if (dados.length > 0) { %>
+    <script>
+        const ctx = document.getElementById('graficoRelatorio').getContext('2d');
+        const tipoRelatorio = "<%= tipo %>";
+        
+        // Pega os dados do EJS e transforma em JSON para o JS
+        const dadosRaw = <%- JSON.stringify(dados) %>;
+        
+        // Limita a 10 itens no gráfico para não poluir (mas a tabela mostra tudo)
+        const dadosGrafico = dadosRaw.slice(0, 10);
+        
+        const labels = dadosGrafico.map(item => item.nome);
+        const valores = dadosGrafico.map(item => item.total);
+
+        // Define o tipo de gráfico com base no relatório
+        // Categorias = Pizza (Pie) | Tempo/Ranking = Barra (Bar)
+        let tipoChart = 'bar';
+        let usarEixoY = true;
+        
+        if (['pagamento', 'secao', 'grupo', 'fabricante', 'familia', 'fornecedor'].includes(tipoRelatorio)) {
+            tipoChart = 'doughnut'; // Ou 'pie'
+            usarEixoY = false;
+        }
+
+        // Gera cores aleatórias bonitas
+        const backgroundColors = [
+            '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', 
+            '#858796', '#5a5c69', '#f8f9fc', '#2e59d9', '#17a673'
+        ];
+
+        new Chart(ctx, {
+            type: tipoChart,
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Faturamento (R$)',
+                    data: valores,
+                    backgroundColor: backgroundColors,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: !usarEixoY, // Mostra legenda só se for pizza
+                        position: 'bottom'
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.label || '';
+                                if (label) { label += ': '; }
+                                if (context.parsed.y !== null) {
+                                    label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(context.parsed.y || context.parsed);
+                                } else {
+                                    // Para gráficos de pizza onde o valor é direto
+                                    label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(context.raw);
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: usarEixoY ? {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return 'R$ ' + value.toLocaleString('pt-BR');
+                            }
+                        }
+                    }
+                } : {
+                    // Remove eixos para gráfico de pizza
+                    x: { display: false },
+                    y: { display: false }
+                }
+            }
+        });
+    </script>
+    <% } %>
+
+</body>
+</html>

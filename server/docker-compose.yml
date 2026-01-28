@@ -41,6 +41,7 @@ services:
       - DB_PASS=SuaSenhaSeguraDoBanco123
       - DB_NAME=dashboard_multitenant
       # Senha para o Webhook de Criar Usuário
-      - SENHA_ADMIN_SISTEMA=SenhaParaCriarNovosClientes 
+      - SENHA_ADMIN_SISTEMA=SenhaParaCriarNovosClientes
+      - API_INTERNAL_URL=http://api-dashboard:8000/api      
     ports:
       - "3000:3000"

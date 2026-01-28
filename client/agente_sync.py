@@ -7,127 +7,148 @@ import os
 import decimal
 from datetime import datetime, date
 
-# --- CONSTANTES DE CONTROLE ---
+# --- CONSTANTES ---
 DELAY_OCIOSO = 30       
 DELAY_ENTRE_LOTES = 2   
 
-# --- CARREGAMENTO DE CONFIGURAÇÕES ---
-print(">> Carregando Agente Sync v21.5 (Estrutura Firebird Corrigida)...", flush=True)
+# --- CARREGAMENTO CONFIG ---
+print(">> Carregando Agente Sync v27.0 (Com Data de Corte)...", flush=True)
 diretorio_base = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(diretorio_base, 'config.ini')
 
 config = configparser.ConfigParser()
 try:
     config.read(config_path)
-    if not config.sections(): raise Exception("Arquivo config.ini vazio ou inválido.")
+    if not config.sections(): raise Exception("Arquivo config.ini vazio.")
     
-    # Defaults
     API_URL = config.get('API', 'url_base', fallback="http://127.0.0.1:8000")
     TAMANHO_LOTE = config.getint('CONFIG', 'tamanho_lote', fallback=20)
-    
-    # Obrigatórios
     TOKEN = config.get('API', 'token_loja', fallback=None)
-    if not TOKEN: raise Exception("Token da loja não encontrado.")
+    if not TOKEN: raise Exception("Token não encontrado.")
     
     DB_PATH = config.get('DATABASE', 'caminho')
     DB_USER = config.get('DATABASE', 'usuario')
     DB_PASS = config.get('DATABASE', 'senha')
     DB_HOST = config.get('DATABASE', 'host')
     DB_PORT = config.get('DATABASE', 'port')
+except Exception as e: print(f"ERRO CONFIG: {e}"); sys.exit(1)
 
-except Exception as e:
-    print(f"ERRO DE CONFIGURAÇÃO: {e}"); sys.exit(1)
-
-# --- CONEXÃO BANCO ---
+# --- CONEXÃO ---
 def get_connection():
-    try:
-        return fdb.connect(host=DB_HOST, port=int(DB_PORT), database=DB_PATH, user=DB_USER, password=DB_PASS, charset='ISO8859_1')
-    except Exception as e:
-        print(f"   [FALHA CONEXÃO BANCO]: {e}", flush=True); return None
+    try: return fdb.connect(host=DB_HOST, port=int(DB_PORT), database=DB_PATH, user=DB_USER, password=DB_PASS, charset='ISO8859_1')
+    except Exception as e: print(f"   [FALHA BANCO]: {e}", flush=True); return None
 
-# --- INSTALADOR AUTOMÁTICO ---
+# --- INSTALADOR ---
 def verificar_e_configurar_banco():
     conn = get_connection()
     if not conn: sys.exit(1)
     cursor = conn.cursor()
 
-    # Lista completa de tabelas para criar o campo SYNC_DASH
-    tabelas_cadastro = ['PRODUTO', 'PESSOA', 'VENDEDOR', 'GRUPO', 'SECAO', 'FORMAPAG', 'FABRICANTE']
+    tabelas_cadastro = ['PRODUTO', 'PESSOA', 'VENDEDOR', 'GRUPO', 'SECAO', 'FORMAPAG', 'FABRICANTE', 'FAMILIA', 'USUARIOS']
     tabelas_movimento = ['SAIDA', 'SAIDA_PRODUTO', 'SAIDA_FORMAPAG']
-    todas_tabelas = tabelas_cadastro + tabelas_movimento
+    todas = tabelas_cadastro + tabelas_movimento
 
-    # Verifica se já está instalado (testando na tabela PRODUTO)
-    precisa_instalar = False
-    try: cursor.execute("SELECT FIRST 1 SYNC_DASH FROM PRODUTO"); conn.commit()
-    except: precisa_instalar = True
+    # 1. Verifica se é a primeira vez (baseado na tabela PRODUTO)
+    primeira_instalacao = False
+    try:
+        cursor.execute("SELECT FIRST 1 SYNK_DASH_PEND FROM PRODUTO")
+        conn.commit()
+    except:
+        primeira_instalacao = True
 
-    # Se já tem em produto, verifica se as tabelas novas (FABRICANTE/FORMAPAG) também têm
-    if not precisa_instalar:
-        for tbl_nova in ['FABRICANTE', 'FORMAPAG']:
-            try: 
-                cursor.execute(f"SELECT FIRST 1 SYNC_DASH FROM {tbl_nova}")
-                conn.commit()
-            except:
-                print(f">> Atualizando estrutura da tabela {tbl_nova}...", flush=True)
-                try:
-                    cursor.execute(f"ALTER TABLE {tbl_nova} ADD SYNC_DASH CHAR(1) DEFAULT 'N'")
-                    cursor.execute(f"""
-                        CREATE OR ALTER TRIGGER TG_SYNC_{tbl_nova} FOR {tbl_nova}
-                        ACTIVE BEFORE INSERT OR UPDATE POSITION 0
-                        AS BEGIN
-                            IF (NEW.SYNC_DASH IS DISTINCT FROM 'S') THEN NEW.SYNC_DASH = 'N';
-                        END
-                    """)
-                    conn.commit()
-                except Exception as e: print(f"Erro ao atualizar {tbl_nova}: {e}")
-        
-        print(">> Banco verificado.", flush=True); conn.close(); return
-
-    print("\n" + "="*50)
-    print(" DETECTADA PRIMEIRA EXECUÇÃO - CONFIGURANDO BANCO")
-    print("="*50)
-    
-    while True:
-        data_input = input(">> A partir de qual data deseja sincronizar as VENDAS? (dd/mm/aaaa): ")
+    # 2. Garante estrutura em TODAS as tabelas
+    print("\n--- VERIFICANDO ESTRUTURA ---")
+    for tbl in todas:
+        col_existe = False
         try:
-            data_corte = datetime.strptime(data_input, "%d/%m/%Y").date()
-            data_str = data_corte.strftime("%Y-%m-%d")
-            break
-        except: print("Data inválida.")
-
-    print("\n1. Criando colunas SYNC_DASH...")
-    for tbl in todas_tabelas:
-        try:
-            cursor.execute(f"ALTER TABLE {tbl} ADD SYNC_DASH CHAR(1) DEFAULT 'N'")
+            cursor.execute(f"SELECT FIRST 1 SYNK_DASH_PEND FROM {tbl}")
             conn.commit()
+            col_existe = True
         except: pass
 
-    print("\n2. Criando Triggers...")
-    for tbl in todas_tabelas:
-        sql_trigger = f"""
-        CREATE OR ALTER TRIGGER TG_SYNC_{tbl} FOR {tbl}
-        ACTIVE BEFORE INSERT OR UPDATE POSITION 0
-        AS BEGIN
-            IF (NEW.SYNC_DASH IS DISTINCT FROM 'S') THEN NEW.SYNC_DASH = 'N';
-        END
-        """
-        try: cursor.execute(sql_trigger); conn.commit()
-        except Exception as e: print(f"Erro Trigger {tbl}: {e}")
+        if not col_existe:
+            print(f">> Criando coluna em {tbl}...", flush=True)
+            try:
+                # Default 'S' = Tudo nasce pendente, depois filtramos
+                cursor.execute(f"ALTER TABLE {tbl} ADD SYNK_DASH_PEND CHAR(1) DEFAULT 'S'")
+                conn.commit()
+            except Exception as e: 
+                if "exists" not in str(e): print(f"Erro Alter {tbl}: {e}")
 
-    print(f"\n3. Marcando registros (Corte: {data_input})...")
-    for tbl in tabelas_cadastro:
-        try:
-            cursor.execute(f"UPDATE {tbl} SET SYNC_DASH = 'N'")
-            conn.commit()
-        except Exception as e: print(f"Erro update inicial {tbl}: {e}")
+            # Trigger de Monitoramento
+            try:
+                cursor.execute(f"""
+                CREATE OR ALTER TRIGGER TG_SYNK_PEND_{tbl} FOR {tbl}
+                ACTIVE BEFORE INSERT OR UPDATE POSITION 0
+                AS BEGIN
+                    IF (INSERTING) THEN 
+                        NEW.SYNK_DASH_PEND = 'S';
+                    ELSE
+                        IF (NEW.SYNK_DASH_PEND = OLD.SYNK_DASH_PEND) THEN 
+                            NEW.SYNK_DASH_PEND = 'S';
+                END
+                """)
+                conn.commit()
+            except Exception as e: print(f"Erro Trigger {tbl}: {e}")
 
-    cursor.execute(f"UPDATE SAIDA SET SYNC_DASH = 'N' WHERE DATA >= '{data_str}'")
-    cursor.execute(f"UPDATE SAIDA_PRODUTO SP SET SYNC_DASH = 'N' WHERE EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SP.ID_SAIDA AND S.DATA >= '{data_str}')")
-    cursor.execute(f"UPDATE SAIDA_FORMAPAG SF SET SYNC_DASH = 'N' WHERE EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SF.ID_SAIDA AND S.DATA >= '{data_str}')")
+    # 3. Se for instalação nova, pergunta a data e configura os dados
+    if primeira_instalacao:
+        print("\n" + "="*50)
+        print(" INSTALAÇÃO INICIAL DETECTADA")
+        print("="*50)
+        
+        while True:
+            d = input(">> Sincronizar vendas a partir de (dd/mm/aaaa): ")
+            try:
+                data_corte = datetime.strptime(d, "%d/%m/%Y").date()
+                data_str = data_corte.strftime("%Y-%m-%d")
+                break
+            except: print("Data inválida. Tente novamente.")
+
+        print(">> Configurando registros iniciais (Aguarde)...")
+        
+        # A. Cadastros: Sobe tudo ('S')
+        for tbl in tabelas_cadastro:
+            try: cursor.execute(f"UPDATE {tbl} SET SYNK_DASH_PEND = 'S'"); conn.commit()
+            except: pass
+
+        # B. Movimento: Marca tudo como 'S' primeiro
+        cursor.execute("UPDATE SAIDA SET SYNK_DASH_PEND = 'S'")
+        conn.commit()
+
+        # C. Remove da fila o que for VELHO (< data_corte)
+        print(f"   - Ignorando vendas anteriores a {d}...")
+        cursor.execute(f"UPDATE SAIDA SET SYNK_DASH_PEND = 'N' WHERE DATA < '{data_str}'")
+        
+        # D. Remove da fila o que já está CANCELADO ('S') no legado
+        print("   - Ignorando vendas antigas canceladas...")
+        cursor.execute(f"UPDATE SAIDA SET SYNK_DASH_PEND = 'N' WHERE ELIMINADO = 'S'")
+        conn.commit()
+
+        # E. Ajusta Itens e Pagamentos baseados na SAIDA
+        print("   - Ajustando itens e pagamentos...")
+        cursor.execute(f"""
+            UPDATE SAIDA_PRODUTO SP SET SYNK_DASH_PEND = 'N' 
+            WHERE EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SP.ID_SAIDA AND S.SYNK_DASH_PEND = 'N')
+        """)
+        cursor.execute(f"""
+            UPDATE SAIDA_FORMAPAG SF SET SYNK_DASH_PEND = 'N' 
+            WHERE EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SF.ID_SAIDA AND S.SYNK_DASH_PEND = 'N')
+        """)
+        cursor.execute(f"""
+            UPDATE SAIDA_PRODUTO SP SET SYNK_DASH_PEND = 'S' 
+            WHERE EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SP.ID_SAIDA AND S.SYNK_DASH_PEND = 'S')
+        """)
+        cursor.execute(f"""
+            UPDATE SAIDA_FORMAPAG SF SET SYNK_DASH_PEND = 'S' 
+            WHERE EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SF.ID_SAIDA AND S.SYNK_DASH_PEND = 'S')
+        """)
+        
+        conn.commit()
+        print(">> Configuração concluída!")
+        time.sleep(2)
     
-    conn.commit(); conn.close()
-    print(">> Configuração OK! Iniciando...")
-    time.sleep(2)
+    conn.close()
 
 # --- UTILS ---
 def limpar_valor(val):
@@ -145,13 +166,12 @@ def row_to_dict(row, col_names):
     for i, col in enumerate(col_names):
         key = col.lower().strip()
         val = limpar_valor(row[i])
-        # Lista de campos que devem ser string
         campos_texto = ['id_grupo', 'id_secao', 'id_filial', 'id_cliente', 
                        'id_vendedor', 'id_transportadora', 'id_formapag', 
-                       'tipo', 'id_fabricante', 'id_fornecedor'] 
+                       'tipo', 'id_fabricante', 'id_fornecedor', 'id_familia', 
+                       'terminal', 'id_usuario']
         if key in campos_texto and val is not None: val = str(val)
         data[key] = val
-    
     if 'id' in data: 
         data['id_original'] = str(data['id'])
         del data['id'] 
@@ -165,32 +185,39 @@ def enviar_lote(endpoint, payload):
 
 def marcar_como_sincronizado(tabela_sql, ids, campo_id="ID"):
     if not ids: return
-    conn = get_connection()
-    if not conn: return
-    cursor = conn.cursor()
+    conn = get_connection(); cursor = conn.cursor()
     try:
-        cursor.executemany(f"UPDATE {tabela_sql} SET SYNC_DASH = 'S' WHERE {campo_id} = ?", [(x,) for x in ids])
+        cursor.executemany(f"UPDATE {tabela_sql} SET SYNK_DASH_PEND = 'N' WHERE {campo_id} = ?", [(x,) for x in ids])
         conn.commit()
-    except Exception as e: print(f"Erro Update: {e}"); conn.rollback()
+    except: conn.rollback()
     finally: conn.close()
 
-# --- SYNC GENÉRICO ---
+# --- SYNC CORE ---
 def sync_controle_banco(nome_tabela, endpoint, tabela_sql, colunas_sql="*", campo_id="ID", filtro_extra=""):
     print(f"[{nome_tabela}]", end=" ", flush=True)
-    where = "WHERE SYNC_DASH = 'N'"
+    
+    where = "WHERE SYNK_DASH_PEND = 'S'"
     if filtro_extra: where += f" AND {filtro_extra}"
     
     conn = get_connection()
     if not conn: return False
     cursor = conn.cursor()
     try:
+        # Tenta pegar lotes
         cursor.execute(f"SELECT FIRST {TAMANHO_LOTE} {colunas_sql} FROM {tabela_sql} {where}")
         rows = cursor.fetchall()
-        col_names = [d[0] for d in cursor.description] # Nomes das colunas retornadas pelo banco (respeita o AS alias)
-    except Exception as e: print(f"Erro SQL {tabela_sql}: {e}"); conn.close(); return False
+        col_names = [d[0] for d in cursor.description]
+    except Exception as e: 
+        # print(f"Erro SQL {tabela_sql}: {e}") # Debug se precisar
+        conn.close(); return False
     conn.close()
 
-    if not rows: print(".", end="", flush=True); return False
+    if not rows: 
+        print(".", end="", flush=True)
+        return False
+
+    # Log visual de progresso
+    print(f" {len(rows)} >>", end=" ", flush=True)
 
     payload = []
     ids_upd = []
@@ -198,84 +225,67 @@ def sync_controle_banco(nome_tabela, endpoint, tabela_sql, colunas_sql="*", camp
         d = row_to_dict(r, col_names)
         val_id = d.get(campo_id.lower().split('.')[-1]) or d.get('id_original')
         if val_id: ids_upd.append(val_id)
-        d.pop('sync_dash', None); d.pop('rdb$db_key', None)
+        d.pop('synk_dash_pend', None); d.pop('rdb$db_key', None); d.pop('sync_dash', None)
         payload.append(d)
 
-    print(f"Enviando {len(payload)}...", end=" ", flush=True)
     if enviar_lote(endpoint, payload):
         marcar_como_sincronizado(tabela_sql, ids_upd, campo_id)
-        print("OK!", flush=True); return True
-    else:
-        print("Falha API.", flush=True); return False
+        print("OK", flush=True); return True
+    else: 
+        print("Falha", flush=True); return False
 
-# --- DELEÇÃO ---
 def verificar_vendas_excluidas():
-    conn = get_connection(); 
-    if not conn: return False
-    cursor = conn.cursor()
+    conn = get_connection(); cursor = conn.cursor()
     try:
-        cursor.execute(f"SELECT FIRST {TAMANHO_LOTE} ID FROM SAIDA WHERE ELIMINADO = 'S' AND SYNC_DASH = 'N'")
+        cursor.execute(f"SELECT FIRST {TAMANHO_LOTE} ID FROM SAIDA WHERE ELIMINADO = 'S' AND SYNK_DASH_PEND = 'S'")
         rows = cursor.fetchall()
         if not rows: conn.close(); return False
-        
         ids = [str(r[0]) for r in rows]
         print(f"[DELECAO] {len(ids)} vendas...", end=" ", flush=True)
         enviados = []
         for i in ids:
             if enviar_lote("/api/sync/deletar-venda", {"id_original": i}): enviados.append(i)
-        
         if enviados: marcar_como_sincronizado("SAIDA", enviados, "ID")
         conn.close(); return len(enviados) > 0
     except: conn.close(); return False
 
-# --- LOOP PRINCIPAL ---
+# --- MAIN ---
 if __name__ == "__main__":
     verificar_e_configurar_banco()
-    print(f"\n--- AGENTE RODANDO ---", flush=True)
+    print(f"\n--- AGENTE RODANDO (Ordem Ajustada) ---", flush=True)
     
     while True:
         try:
             encontrou = False
+            
             if verificar_vendas_excluidas(): encontrou = True
 
-            # --- CADASTROS (COM ALIAS 'AS NOME' PARA CORRIGIR ESTRUTURA) ---
+            # 1. USUARIO / SECAO / GRUPO / FAMILIA / VENDEDOR
+            if sync_controle_banco("USUARIOS", "/api/sync/cadastros/usuario_pdv", "USUARIOS", "ID, NOME, LOGIN, SYNK_DASH_PEND", "ID"): encontrou = True
+            if sync_controle_banco("SECAO", "/api/sync/cadastros/secao", "SECAO", "ID, SECAO AS NOME, SYNK_DASH_PEND", "ID"): encontrou = True
+            if sync_controle_banco("GRUPO", "/api/sync/cadastros/grupo", "GRUPO", "ID, GRUPO AS NOME, ID_SECAO, SYNK_DASH_PEND", "ID"): encontrou = True
+            if sync_controle_banco("FAMILIA", "/api/sync/cadastros/familia", "FAMILIA", "ID, FAMILIA AS NOME, SYNK_DASH_PEND", "ID"): encontrou = True
+            if sync_controle_banco("VENDEDOR", "/api/sync/cadastros/vendedor", "VENDEDOR", "ID, NOME, COMISSAO, ATIVO, SYNK_DASH_PEND", "ID"): encontrou = True
             
-            # PRODUTO (Campos extras ID_FABRICANTE e ID_FORNECEDOR inclusos)
-            cols_prod = "ID, NOME, PRECO_VENDA, CUSTO_TOTAL, ID_GRUPO, ID_FABRICANTE, ID_FORNECEDOR, ATIVO, SYNC_DASH"
+            # 2. PRODUTOS (Prioridade Alta)
+            cols_prod = "ID, NOME, PRECO_VENDA, CUSTO_TOTAL, ID_GRUPO, ID_FABRICANTE, ID_FORNECEDOR, ID_FAMILIA, ATIVO, SYNK_DASH_PEND"
             if sync_controle_banco("PRODUTO", "/api/sync/cadastros/produto", "PRODUTO", cols_prod, "ID"): encontrou = True
             
-            # FABRICANTE (Mapeando FABRICANTE -> NOME)
-            if sync_controle_banco("FABRICANTE", "/api/sync/cadastros/fabricante", "FABRICANTE", "ID, FABRICANTE AS NOME, SYNC_DASH", "ID"): encontrou = True
+            # 3. DEMAIS CADASTROS
+            if sync_controle_banco("FABRICANTE", "/api/sync/cadastros/fabricante", "FABRICANTE", "ID, FABRICANTE AS NOME, SYNK_DASH_PEND", "ID"): encontrou = True
+            if sync_controle_banco("CLIENTE", "/api/sync/cadastros/cliente", "PESSOA", "ID, NOME, CNPJ_CPF, CIDADE, ATIVO, SYNK_DASH_PEND", "ID"): encontrou = True
+            if sync_controle_banco("FORMAPAG", "/api/sync/cadastros/formapag", "FORMAPAG", "ID, FORMAPAG AS NOME, TIPO, SYNK_DASH_PEND", "ID"): encontrou = True
             
-            # CLIENTE/FORNECEDOR (PESSOA)
-            if sync_controle_banco("CLIENTE", "/api/sync/cadastros/cliente", "PESSOA", "ID, NOME, CNPJ_CPF, CIDADE, ATIVO, SYNC_DASH", "ID"): encontrou = True
+            # 4. MOVIMENTO
+            cols_saida = "SAIDA.*, USUARIO AS ID_USUARIO"
+            if sync_controle_banco("SAIDA", "/api/sync/saida", "SAIDA", cols_saida, "ID", filtro_extra="(ELIMINADO IS NULL OR ELIMINADO = 'N')"): encontrou = True
             
-            # VENDEDOR
-            if sync_controle_banco("VENDEDOR", "/api/sync/cadastros/vendedor", "VENDEDOR", "ID, NOME, COMISSAO, ATIVO, SYNC_DASH", "ID"): encontrou = True
-            
-            # GRUPO (Mapeando GRUPO -> NOME)
-            if sync_controle_banco("GRUPO", "/api/sync/cadastros/grupo", "GRUPO", "ID, GRUPO AS NOME, ID_SECAO, SYNC_DASH", "ID"): encontrou = True
-            
-            # SECAO (Mapeando SECAO -> NOME)
-            if sync_controle_banco("SECAO", "/api/sync/cadastros/secao", "SECAO", "ID, SECAO AS NOME, SYNC_DASH", "ID"): encontrou = True
-            
-            # FORMAPAG (Mapeando FORMAPAG -> NOME)
-            if sync_controle_banco("FORMAPAG", "/api/sync/cadastros/formapag", "FORMAPAG", "ID, FORMAPAG AS NOME, TIPO, SYNC_DASH", "ID"): encontrou = True
-            
-            # --- MOVIMENTO ---
-            
-            # SAIDA
-            if sync_controle_banco("SAIDA", "/api/sync/saida", "SAIDA", "*", "ID", filtro_extra="(ELIMINADO IS NULL OR ELIMINADO = 'N')"): encontrou = True
-            
-            # ITENS DA SAIDA
             q_itens = "EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SAIDA_PRODUTO.ID_SAIDA AND (S.ELIMINADO IS NULL OR S.ELIMINADO = 'N'))"
             if sync_controle_banco("SAIDA_PRODUTO", "/api/sync/saida_produto", "SAIDA_PRODUTO", "*", "ID", filtro_extra=q_itens): encontrou = True
             
-            # PAGAMENTOS DA SAIDA
             q_pag = "EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SAIDA_FORMAPAG.ID_SAIDA AND (S.ELIMINADO IS NULL OR S.ELIMINADO = 'N'))"
             if sync_controle_banco("SAIDA_FORMAPAG", "/api/sync/saida_formapag", "SAIDA_FORMAPAG", "*", "ID", filtro_extra=q_pag): encontrou = True
 
-            # --- DELAYS ---
             if not encontrou:
                 print(f"\r[Ocioso] Aguardando {DELAY_OCIOSO}s...   ", end="", flush=True)
                 time.sleep(DELAY_OCIOSO)

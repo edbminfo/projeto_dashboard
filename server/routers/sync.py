@@ -22,11 +22,9 @@ def upsert_generico(schema: str, tabela: str, dados: List[dict]):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Pega as chaves do primeiro item para saber quais colunas criar/inserir
         chaves_json = [k for k in dados[0].keys() if k not in ('id_original', 'id')]
         cols_create = ", ".join([f"{k} TEXT" for k in chaves_json])
         
-        # Cria tabela se não existir
         sql_create = f"""
             CREATE TABLE IF NOT EXISTS {schema}.{tabela} (
                 uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -38,7 +36,6 @@ def upsert_generico(schema: str, tabela: str, dados: List[dict]):
         """
         cursor.execute(sql_create)
         
-        # Adiciona colunas novas dinamicamente
         colunas_banco = get_existing_columns(cursor, schema, tabela)
         for col in chaves_json:
             if col not in colunas_banco:
@@ -47,15 +44,13 @@ def upsert_generico(schema: str, tabela: str, dados: List[dict]):
         if 'modificado_em' not in colunas_banco: cursor.execute(f"ALTER TABLE {schema}.{tabela} ADD COLUMN modificado_em TIMESTAMP DEFAULT NOW()")
         if 'id_original' not in colunas_banco: cursor.execute(f"ALTER TABLE {schema}.{tabela} ADD COLUMN id_original VARCHAR(50)")
 
-        # Index para performance
         try:
             cursor.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tabela}_id_original ON {schema}.{tabela} (id_original)")
         except: pass
 
-        # Inserção de dados
         for item in dados:
             campos = [k for k in item.keys() if k != 'id'] 
-            valores = [str(item[k]) if item[k] is not None else None for k in campos] # Garante string
+            valores = [str(item[k]) if item[k] is not None else None for k in campos]
             placeholders = ", ".join(["%s"] * len(valores))
             cols_insert = ", ".join(campos)
             
@@ -84,12 +79,9 @@ def deletar_venda(dados: DeleteVendaSchema, schema: str = Depends(validar_token)
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Apaga os filhos primeiro
         cursor.execute(f"DELETE FROM {schema}.saida_produto WHERE id_saida = %s", (dados.id_original,))
         cursor.execute(f"DELETE FROM {schema}.saida_formapag WHERE id_saida = %s", (dados.id_original,))
-        # Apaga a venda pai
         cursor.execute(f"DELETE FROM {schema}.saida WHERE id_original = %s", (dados.id_original,))
-        
         conn.commit()
         return {"status": "deletado", "id": dados.id_original}
     except Exception as e:
@@ -120,7 +112,6 @@ async def sync_grupo(request: Request, schema: str = Depends(validar_token)):
 async def sync_secao(request: Request, schema: str = Depends(validar_token)): 
     return upsert_generico(schema, "secao", await request.json())
 
-# --- NOVAS ROTAS (Forma Pagto e Fabricante) ---
 @router.post("/sync/cadastros/formapag")
 async def sync_formapag(request: Request, schema: str = Depends(validar_token)): 
     return upsert_generico(schema, "formapag", await request.json())
@@ -128,6 +119,15 @@ async def sync_formapag(request: Request, schema: str = Depends(validar_token)):
 @router.post("/sync/cadastros/fabricante")
 async def sync_fabricante(request: Request, schema: str = Depends(validar_token)): 
     return upsert_generico(schema, "fabricante", await request.json())
+
+@router.post("/sync/cadastros/familia")
+async def sync_familia(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "familia", await request.json())
+
+# --- NOVA ROTA: USUÁRIO PDV ---
+@router.post("/sync/cadastros/usuario_pdv")
+async def sync_usuario_pdv(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "usuario_pdv", await request.json())
 
 # --- ROTAS DE MOVIMENTO ---
 @router.post("/sync/saida")

@@ -32,12 +32,15 @@ def get_sql_novo_cliente(nome_schema):
         data TIMESTAMP,
         total TEXT,
         id_cliente VARCHAR(50),
+        id_vendedor VARCHAR(50),
+        terminal VARCHAR(50),      -- Novo: Caixa/Terminal
+        id_usuario VARCHAR(50),    -- Novo: Operador do PDV
         eliminado VARCHAR(1),
         criado_em TIMESTAMP DEFAULT NOW(),
         modificado_em TIMESTAMP DEFAULT NOW()
     );
 
-    -- 2. Tabela de Itens (Produtos da Venda)
+    -- 2. Tabela de Itens
     CREATE TABLE IF NOT EXISTS {nome_schema}.saida_produto (
         uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         id_original VARCHAR(50) UNIQUE,
@@ -51,7 +54,7 @@ def get_sql_novo_cliente(nome_schema):
     CREATE INDEX IF NOT EXISTS idx_sp_saida ON {nome_schema}.saida_produto (id_saida);
     CREATE INDEX IF NOT EXISTS idx_sp_produto ON {nome_schema}.saida_produto (id_produto);
 
-    -- 3. Formas de Pagamento (Cadastro)
+    -- 3. Formas de Pagamento
     CREATE TABLE IF NOT EXISTS {nome_schema}.formapag (
         uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         id_original VARCHAR(50) UNIQUE,
@@ -94,6 +97,15 @@ def get_sql_novo_cliente(nome_schema):
         modificado_em TIMESTAMP DEFAULT NOW()
     );
     
+    CREATE TABLE IF NOT EXISTS {nome_schema}.usuario_pdv (  -- Novo: Tabela de Operadores
+        uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id_original VARCHAR(50) UNIQUE,
+        nome VARCHAR(100),
+        login VARCHAR(50),
+        criado_em TIMESTAMP DEFAULT NOW(),
+        modificado_em TIMESTAMP DEFAULT NOW()
+    );
+    
     CREATE TABLE IF NOT EXISTS {nome_schema}.secao (
         uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         id_original VARCHAR(50) UNIQUE,
@@ -119,6 +131,14 @@ def get_sql_novo_cliente(nome_schema):
         modificado_em TIMESTAMP DEFAULT NOW()
     );
 
+    CREATE TABLE IF NOT EXISTS {nome_schema}.familia (
+        uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id_original VARCHAR(50) UNIQUE,
+        nome VARCHAR(100),
+        criado_em TIMESTAMP DEFAULT NOW(),
+        modificado_em TIMESTAMP DEFAULT NOW()
+    );
+
     CREATE TABLE IF NOT EXISTS {nome_schema}.produto (
         uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         id_original VARCHAR(50) UNIQUE,
@@ -126,8 +146,9 @@ def get_sql_novo_cliente(nome_schema):
         preco_venda TEXT,
         custo_total TEXT,
         id_grupo VARCHAR(50),
-        id_fabricante VARCHAR(50), -- Novo
-        id_fornecedor VARCHAR(50), -- Novo
+        id_fabricante VARCHAR(50),
+        id_fornecedor VARCHAR(50),
+        id_familia VARCHAR(50),
         ativo VARCHAR(1),
         criado_em TIMESTAMP DEFAULT NOW(),
         modificado_em TIMESTAMP DEFAULT NOW()
@@ -150,7 +171,6 @@ def init_master_table():
         );
         """)
         
-        # Garante a tabela de usuários ADMIN do sistema
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS public.usuarios (
             id SERIAL PRIMARY KEY,
