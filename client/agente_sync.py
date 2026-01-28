@@ -7,8 +7,12 @@ import os
 import decimal
 from datetime import datetime, date
 
-# --- CONFIGURAÇÕES ---
-print(">> Carregando Agente Sync v21.0 (Com Deleção de Vendas)...", flush=True)
+# --- CONSTANTES DE CONTROLE ---
+DELAY_OCIOSO = 30       # Tempo (segundos) de espera quando NÃO há dados para enviar
+DELAY_ENTRE_LOTES = 2   # Tempo (segundos) de pausa entre envios (evita sobrecarga)
+
+# --- CARREGAMENTO DE CONFIGURAÇÕES ---
+print(">> Carregando Agente Sync v21.2 (URL Default + Lote 20)...", flush=True)
 diretorio_base = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(diretorio_base, 'config.ini')
 
@@ -16,16 +20,40 @@ config = configparser.ConfigParser()
 config.read(config_path)
 
 try:
-    API_URL = config['API']['url_base']
-    TOKEN = config['API']['token_loja']
-    DB_PATH = config['DATABASE']['caminho']
-    DB_USER = config['DATABASE']['usuario']
-    DB_PASS = config['DATABASE']['senha']
-    DB_HOST = config['DATABASE']['host']
-    DB_PORT = config['DATABASE']['port']
-    TAMANHO_LOTE = int(config['CONFIG'].get('tamanho_lote', 50))
+    # 1. URL DA API (Com valor padrão direto no código)
+    # Se tiver no arquivo, usa do arquivo. Se não, usa o localhost.
+    if config.has_option('API', 'url_base'):
+        API_URL = config.get('API', 'url_base')
+    else:
+        API_URL = "http://127.0.0.1:8000"
+
+    # 2. TAMANHO DO LOTE (Padrão 20, respeitando o config se existir)
+    if config.has_option('CONFIG', 'tamanho_lote'):
+        TAMANHO_LOTE = config.getint('CONFIG', 'tamanho_lote')
+    else:
+        TAMANHO_LOTE = 20
+
+    # 3. DEMAIS CONFIGURAÇÕES (Obrigatórias)
+    # Token é obrigatório estar no arquivo
+    TOKEN = config.get('API', 'token_loja', fallback=None)
+    if not TOKEN:
+        raise Exception("O 'token_loja' é obrigatório no config.ini")
+
+    # Banco de Dados
+    if not config.has_section('DATABASE'):
+        raise Exception("Seção [DATABASE] não encontrada no config.ini")
+        
+    DB_PATH = config.get('DATABASE', 'caminho')
+    DB_USER = config.get('DATABASE', 'usuario')
+    DB_PASS = config.get('DATABASE', 'senha')
+    DB_HOST = config.get('DATABASE', 'host')
+    DB_PORT = config.get('DATABASE', 'port')
+
+    print(f">> Configuração: URL={API_URL} | Lote={TAMANHO_LOTE}")
+
 except Exception as e:
-    print(f"ERRO DE CONFIG: {e}"); sys.exit(1)
+    print(f"ERRO CRÍTICO DE CONFIGURAÇÃO: {e}")
+    sys.exit(1)
 
 # --- CONEXÃO BANCO ---
 def get_connection():
@@ -148,7 +176,6 @@ def marcar_como_sincronizado(tabela_sql, ids_processados, campo_id="ID"):
 def sync_controle_banco(nome_tabela, endpoint, tabela_sql, colunas_sql="*", campo_id="ID", filtro_extra=""):
     print(f"[{nome_tabela}]", end=" ", flush=True)
     
-    # MODIFICAÇÃO: Filtra apenas o que NÃO está eliminado
     where_clause = "WHERE SYNC_DASH = 'N'"
     if filtro_extra:
         where_clause += f" AND {filtro_extra}"
@@ -194,24 +221,18 @@ def sync_controle_banco(nome_tabela, endpoint, tabela_sql, colunas_sql="*", camp
         print("Falha API.", flush=True)
         return False
 
-# --- FUNÇÃO NOVA: PROCESSAR DELEÇÕES ---
+# --- PROCESSAR DELEÇÕES ---
 def verificar_vendas_excluidas():
-    """
-    Busca vendas marcadas como ELIMINADO='S' mas ainda pendentes de sync (SYNC_DASH='N')
-    Envia comando de deleção para o servidor.
-    """
     conn = get_connection()
     if not conn: return False
     cursor = conn.cursor()
     
     try:
-        # Busca ID das vendas eliminadas pendentes de aviso
         cursor.execute(f"SELECT FIRST {TAMANHO_LOTE} ID FROM SAIDA WHERE ELIMINADO = 'S' AND SYNC_DASH = 'N'")
         rows = cursor.fetchall()
         
         if not rows: 
-            conn.close()
-            return False
+            conn.close(); return False
 
         print(f"[DELECAO] Encontradas {len(rows)} vendas eliminadas...", end=" ", flush=True)
         
@@ -219,14 +240,11 @@ def verificar_vendas_excluidas():
         for r in rows:
             id_venda = str(r[0])
             payload = {"id_original": id_venda}
-            
-            # Chama a rota específica de deleção
             if enviar_lote("/api/sync/deletar-venda", payload):
                 ids_sucesso.append(id_venda)
         
-        conn.close() # Fecha leitura para abrir update
+        conn.close() 
         
-        # Marca como Sincronizado ('S') para não tentar apagar de novo
         if ids_sucesso:
             marcar_como_sincronizado("SAIDA", ids_sucesso, "ID")
             print(f"Processadas: {len(ids_sucesso)} OK!")
@@ -242,15 +260,16 @@ def verificar_vendas_excluidas():
 if __name__ == "__main__":
     verificar_e_configurar_banco()
     print(f"\n--- AGENTE EM EXECUÇÃO ---", flush=True)
+    print(f"Modo Ocioso: {DELAY_OCIOSO}s | Modo Ativo (Intervalo): {DELAY_ENTRE_LOTES}s")
     
     while True:
         try:
             dados_encontrados = False
             
-            # 1. Verifica se tem coisa para deletar primeiro
+            # 1. Verifica deleções
             if verificar_vendas_excluidas(): dados_encontrados = True
 
-            # 2. Cadastros (Normal)
+            # 2. Cadastros
             if sync_controle_banco("PRODUTO", "/api/sync/cadastros/produto", "PRODUTO", "ID, NOME, PRECO_VENDA, CUSTO_TOTAL, ID_GRUPO, ATIVO, SYNC_DASH", "ID"): dados_encontrados = True
             if sync_controle_banco("CLIENTE", "/api/sync/cadastros/cliente", "PESSOA", "ID, NOME, CNPJ_CPF, CIDADE, ATIVO, SYNC_DASH", "ID"): dados_encontrados = True
             if sync_controle_banco("VENDEDOR", "/api/sync/cadastros/vendedor", "VENDEDOR", "ID, NOME, COMISSAO, ATIVO, SYNC_DASH", "ID"): dados_encontrados = True
@@ -258,12 +277,8 @@ if __name__ == "__main__":
             if sync_controle_banco("SECAO", "/api/sync/cadastros/secao", "SECAO", "ID, SECAO, SYNC_DASH", "ID"): dados_encontrados = True
             
             # 3. Movimento (Vendas)
-            # AQUI: Adicionado filtro_extra para ignorar ELIMINADO='S' na subida normal
-            # Se for 'S', a função verificar_vendas_excluidas cuidará dele.
             if sync_controle_banco("SAIDA", "/api/sync/saida", "SAIDA", "*", "ID", filtro_extra="(ELIMINADO IS NULL OR ELIMINADO = 'N')"): dados_encontrados = True
             
-            # Itens e Pagamentos não têm campo ELIMINADO, então filtramos pelo pai (SAIDA)
-            # Se a SAIDA for 'S', não enviamos os itens (eles serão deletados em cascata pelo ID da venda)
             sql_filtro_itens = """
                 EXISTS (SELECT 1 FROM SAIDA S 
                         WHERE S.ID = SAIDA_PRODUTO.ID_SAIDA 
@@ -278,11 +293,13 @@ if __name__ == "__main__":
             """
             if sync_controle_banco("SAIDA_FORMAPAG", "/api/sync/saida_formapag", "SAIDA_FORMAPAG", "*", "ID", filtro_extra=sql_filtro_pag): dados_encontrados = True
 
+            # --- CONTROLE DE DELAY ---
             if not dados_encontrados:
-                print(".", end="", flush=True)
-                time.sleep(5) 
+                print(f"\r[Ocioso] Nenhuma pendência. Aguardando {DELAY_OCIOSO}s...   ", end="", flush=True)
+                time.sleep(DELAY_OCIOSO) 
             else:
-                time.sleep(0.1) 
+                print(f" [Pausa técnica: {DELAY_ENTRE_LOTES}s]", end="\n", flush=True)
+                time.sleep(DELAY_ENTRE_LOTES) 
             
         except KeyboardInterrupt:
             print("\nParando...", flush=True); break

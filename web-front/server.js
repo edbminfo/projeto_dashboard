@@ -262,13 +262,13 @@ app.get('/painel', authGuard, async (req, res) => {
         }
         // ============================================================
 
-        // 4. Queries (Só roda se a coluna existir)
+        // 4. Queries (COM CAST PARA NUMERIC PARA EVITAR ERRO DE SOMA)
         const sqlCapa = `
             SELECT 
-                COALESCE(SUM("total"), 0) as faturamento,
+                COALESCE(SUM(NULLIF("total", '')::numeric), 0) as faturamento,
                 COUNT(*) as qtde_vendas,
-                COALESCE(MAX("total"), 0) as maior_venda,
-                COALESCE(MIN("total"), 0) as menor_venda
+                COALESCE(MAX(NULLIF("total", '')::numeric), 0) as maior_venda,
+                COALESCE(MIN(NULLIF("total", '')::numeric), 0) as menor_venda
             FROM ${schema}.saida
             WHERE "data"::date BETWEEN $1 AND $2
         `;
@@ -282,13 +282,14 @@ app.get('/painel', authGuard, async (req, res) => {
         let resItens = { rows: [{ qtd_itens: 0, cmv: 0 }] };
 
         if (checkItens.rows.length > 0) {
+            // CORREÇÃO: Tabela 'produto' no singular e CAST nos valores
             const sqlItens = `
                 SELECT 
-                    COALESCE(SUM(sp."quant"), 0) as qtd_itens,
-                    COALESCE(SUM(sp."quant" * COALESCE(p.custo_total, 0)), 0) as cmv
+                    COALESCE(SUM(NULLIF(sp."quant", '')::numeric), 0) as qtd_itens,
+                    COALESCE(SUM(NULLIF(sp."quant", '')::numeric * COALESCE(NULLIF(p.custo_total, '')::numeric, 0)), 0) as cmv
                 FROM ${schema}.saida_produto sp
                 JOIN ${schema}.saida s ON sp.id_saida = s.id_original
-                LEFT JOIN ${schema}.produtos p ON sp.id_produto = p.id_original
+                LEFT JOIN ${schema}.produto p ON sp.id_produto = p.id_original
                 WHERE s."data"::date BETWEEN $1 AND $2
             `;
             resItens = await pool.query(sqlItens, [dIni, dFim]);
