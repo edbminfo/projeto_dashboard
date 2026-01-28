@@ -357,6 +357,19 @@ async function initDb() {
         try {
             const client = await pool.connect();
             try {
+                // >>>> NOVA TABELA (Garante a existência da tabela mestre) <<<<
+                await client.query(`
+                    CREATE TABLE IF NOT EXISTS lojas_sincronizadas (
+                        id SERIAL PRIMARY KEY,
+                        nome_fantasia VARCHAR(100),
+                        cnpj VARCHAR(20) UNIQUE,
+                        api_token VARCHAR(100),
+                        schema_name VARCHAR(50) NOT NULL,
+                        ativo BOOLEAN DEFAULT TRUE,
+                        criado_em TIMESTAMP DEFAULT NOW()
+                    );
+                `);
+
                 await client.query(`CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, nome VARCHAR(100), telefone VARCHAR(20) UNIQUE, criado_em TIMESTAMP DEFAULT NOW());`);
                 await client.query(`CREATE TABLE IF NOT EXISTS sessoes_login (id SERIAL PRIMARY KEY, telefone VARCHAR(20), token_acesso VARCHAR(6), expira_em TIMESTAMP, usado BOOLEAN DEFAULT FALSE);`);
                 await client.query(`CREATE TABLE IF NOT EXISTS usuarios_lojas (usuario_id INT REFERENCES usuarios(id), loja_id INT REFERENCES lojas_sincronizadas(id), PRIMARY KEY (usuario_id, loja_id));`);

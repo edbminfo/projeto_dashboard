@@ -15,19 +15,21 @@ def get_existing_columns(cursor, schema, tabela):
     cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_schema = '{schema}' AND table_name = '{tabela}'")
     return {row[0] for row in cursor.fetchall()}
 
-# --- UPSERT INTELIGENTE (Mantido Igual) ---
+# --- UPSERT INTELIGENTE ---
 def upsert_generico(schema: str, tabela: str, dados: List[dict]):
     if not dados: return {"status": "vazio"}
     
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        # Pega as chaves do primeiro item para saber quais colunas criar/inserir
         chaves_json = [k for k in dados[0].keys() if k not in ('id_original', 'id')]
         cols_create = ", ".join([f"{k} TEXT" for k in chaves_json])
         
+        # Cria tabela se não existir
         sql_create = f"""
             CREATE TABLE IF NOT EXISTS {schema}.{tabela} (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                uuid_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 id_original VARCHAR(50),
                 criado_em TIMESTAMP DEFAULT NOW(),
                 modificado_em TIMESTAMP DEFAULT NOW(),
@@ -36,6 +38,7 @@ def upsert_generico(schema: str, tabela: str, dados: List[dict]):
         """
         cursor.execute(sql_create)
         
+        # Adiciona colunas novas dinamicamente
         colunas_banco = get_existing_columns(cursor, schema, tabela)
         for col in chaves_json:
             if col not in colunas_banco:
@@ -44,15 +47,18 @@ def upsert_generico(schema: str, tabela: str, dados: List[dict]):
         if 'modificado_em' not in colunas_banco: cursor.execute(f"ALTER TABLE {schema}.{tabela} ADD COLUMN modificado_em TIMESTAMP DEFAULT NOW()")
         if 'id_original' not in colunas_banco: cursor.execute(f"ALTER TABLE {schema}.{tabela} ADD COLUMN id_original VARCHAR(50)")
 
+        # Index para performance
         try:
             cursor.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{tabela}_id_original ON {schema}.{tabela} (id_original)")
         except: pass
 
+        # Inserção de dados
         for item in dados:
             campos = [k for k in item.keys() if k != 'id'] 
-            valores = [item[k] for k in campos]
+            valores = [str(item[k]) if item[k] is not None else None for k in campos] # Garante string
             placeholders = ", ".join(["%s"] * len(valores))
             cols_insert = ", ".join(campos)
+            
             update_set = ", ".join([f"{c} = EXCLUDED.{c}" for c in campos if c != 'id_original'])
             if update_set: update_set += ", modificado_em = NOW()"
             else: update_set = "modificado_em = NOW()"
@@ -67,70 +73,71 @@ def upsert_generico(schema: str, tabela: str, dados: List[dict]):
         conn.commit()
         return {"status": "sucesso", "tabela": tabela, "qtd": len(dados)}
     except Exception as e:
-        conn.rollback(); print(f"Erro Sync {tabela}: {e}")
+        conn.rollback()
+        print(f"Erro Sync {tabela}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally: conn.close()
 
-# --- NOVA ROTA DE DELEÇÃO (LIMPEZA EM CASCATA) ---
+# --- ROTA DE DELEÇÃO ---
 @router.post("/sync/deletar-venda")
 def deletar_venda(dados: DeleteVendaSchema, schema: str = Depends(validar_token)):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        # Apaga os filhos primeiro (Produtos e Pagamentos)
-        # Atenção: saida_produto e saida_formapag usam id_saida para vincular
-        
-        # 1. Tenta apagar itens da venda (se a tabela existir)
-        cursor.execute(f"""
-            DELETE FROM {schema}.saida_produto 
-            WHERE id_saida = %s
-        """, (dados.id_original,))
-        
-        # 2. Tenta apagar pagamentos da venda
-        cursor.execute(f"""
-            DELETE FROM {schema}.saida_formapag 
-            WHERE id_saida = %s
-        """, (dados.id_original,))
-        
-        # 3. Apaga a venda (Pai)
-        cursor.execute(f"""
-            DELETE FROM {schema}.saida 
-            WHERE id_original = %s
-        """, (dados.id_original,))
+        # Apaga os filhos primeiro
+        cursor.execute(f"DELETE FROM {schema}.saida_produto WHERE id_saida = %s", (dados.id_original,))
+        cursor.execute(f"DELETE FROM {schema}.saida_formapag WHERE id_saida = %s", (dados.id_original,))
+        # Apaga a venda pai
+        cursor.execute(f"DELETE FROM {schema}.saida WHERE id_original = %s", (dados.id_original,))
         
         conn.commit()
         return {"status": "deletado", "id": dados.id_original}
-        
     except Exception as e:
         conn.rollback()
-        # Se a tabela não existir, não é erro grave, apenas ignora
         if "undefined table" in str(e): return {"status": "ignorado"}
         print(f"Erro ao deletar venda {dados.id_original}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
+    finally: conn.close()
 
-# --- ROTAS DE CADASTRO/MOVIMENTO ---
+# --- ROTAS DE CADASTRO ---
 @router.post("/sync/cadastros/produto")
-async def sync_produto(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "produto", await request.json())
+async def sync_produto(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "produto", await request.json())
 
 @router.post("/sync/cadastros/cliente")
-async def sync_cliente(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "cliente", await request.json())
+async def sync_cliente(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "cliente", await request.json())
 
 @router.post("/sync/cadastros/vendedor")
-async def sync_vendedor(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "vendedor", await request.json())
+async def sync_vendedor(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "vendedor", await request.json())
 
 @router.post("/sync/cadastros/grupo")
-async def sync_grupo(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "grupo", await request.json())
+async def sync_grupo(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "grupo", await request.json())
 
 @router.post("/sync/cadastros/secao")
-async def sync_secao(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "secao", await request.json())
+async def sync_secao(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "secao", await request.json())
 
+# --- NOVAS ROTAS (Forma Pagto e Fabricante) ---
+@router.post("/sync/cadastros/formapag")
+async def sync_formapag(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "formapag", await request.json())
+
+@router.post("/sync/cadastros/fabricante")
+async def sync_fabricante(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "fabricante", await request.json())
+
+# --- ROTAS DE MOVIMENTO ---
 @router.post("/sync/saida")
-async def sync_saida(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "saida", await request.json())
+async def sync_saida(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "saida", await request.json())
 
 @router.post("/sync/saida_produto")
-async def sync_saida_produto(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "saida_produto", await request.json())
+async def sync_saida_produto(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "saida_produto", await request.json())
 
 @router.post("/sync/saida_formapag")
-async def sync_saida_formapag(request: Request, schema: str = Depends(validar_token)): return upsert_generico(schema, "saida_formapag", await request.json())
+async def sync_saida_formapag(request: Request, schema: str = Depends(validar_token)): 
+    return upsert_generico(schema, "saida_formapag", await request.json())

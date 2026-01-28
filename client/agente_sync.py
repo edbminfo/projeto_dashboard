@@ -8,60 +8,42 @@ import decimal
 from datetime import datetime, date
 
 # --- CONSTANTES DE CONTROLE ---
-DELAY_OCIOSO = 30       # Tempo (segundos) de espera quando NÃO há dados para enviar
-DELAY_ENTRE_LOTES = 2   # Tempo (segundos) de pausa entre envios (evita sobrecarga)
+DELAY_OCIOSO = 30       
+DELAY_ENTRE_LOTES = 2   
 
 # --- CARREGAMENTO DE CONFIGURAÇÕES ---
-print(">> Carregando Agente Sync v21.2 (URL Default + Lote 20)...", flush=True)
+print(">> Carregando Agente Sync v21.5 (Estrutura Firebird Corrigida)...", flush=True)
 diretorio_base = os.path.dirname(os.path.abspath(__file__))
 config_path = os.path.join(diretorio_base, 'config.ini')
 
 config = configparser.ConfigParser()
-config.read(config_path)
-
 try:
-    # 1. URL DA API (Com valor padrão direto no código)
-    # Se tiver no arquivo, usa do arquivo. Se não, usa o localhost.
-    if config.has_option('API', 'url_base'):
-        API_URL = config.get('API', 'url_base')
-    else:
-        API_URL = "http://127.0.0.1:8000"
-
-    # 2. TAMANHO DO LOTE (Padrão 20, respeitando o config se existir)
-    if config.has_option('CONFIG', 'tamanho_lote'):
-        TAMANHO_LOTE = config.getint('CONFIG', 'tamanho_lote')
-    else:
-        TAMANHO_LOTE = 20
-
-    # 3. DEMAIS CONFIGURAÇÕES (Obrigatórias)
-    # Token é obrigatório estar no arquivo
+    config.read(config_path)
+    if not config.sections(): raise Exception("Arquivo config.ini vazio ou inválido.")
+    
+    # Defaults
+    API_URL = config.get('API', 'url_base', fallback="http://127.0.0.1:8000")
+    TAMANHO_LOTE = config.getint('CONFIG', 'tamanho_lote', fallback=20)
+    
+    # Obrigatórios
     TOKEN = config.get('API', 'token_loja', fallback=None)
-    if not TOKEN:
-        raise Exception("O 'token_loja' é obrigatório no config.ini")
-
-    # Banco de Dados
-    if not config.has_section('DATABASE'):
-        raise Exception("Seção [DATABASE] não encontrada no config.ini")
-        
+    if not TOKEN: raise Exception("Token da loja não encontrado.")
+    
     DB_PATH = config.get('DATABASE', 'caminho')
     DB_USER = config.get('DATABASE', 'usuario')
     DB_PASS = config.get('DATABASE', 'senha')
     DB_HOST = config.get('DATABASE', 'host')
     DB_PORT = config.get('DATABASE', 'port')
 
-    print(f">> Configuração: URL={API_URL} | Lote={TAMANHO_LOTE}")
-
 except Exception as e:
-    print(f"ERRO CRÍTICO DE CONFIGURAÇÃO: {e}")
-    sys.exit(1)
+    print(f"ERRO DE CONFIGURAÇÃO: {e}"); sys.exit(1)
 
 # --- CONEXÃO BANCO ---
 def get_connection():
     try:
         return fdb.connect(host=DB_HOST, port=int(DB_PORT), database=DB_PATH, user=DB_USER, password=DB_PASS, charset='ISO8859_1')
     except Exception as e:
-        print(f"   [FALHA CONEXÃO BANCO]: {e}", flush=True)
-        return None
+        print(f"   [FALHA CONEXÃO BANCO]: {e}", flush=True); return None
 
 # --- INSTALADOR AUTOMÁTICO ---
 def verificar_e_configurar_banco():
@@ -69,17 +51,37 @@ def verificar_e_configurar_banco():
     if not conn: sys.exit(1)
     cursor = conn.cursor()
 
-    tabelas_cadastro = ['PRODUTO', 'PESSOA', 'VENDEDOR', 'GRUPO', 'SECAO']
+    # Lista completa de tabelas para criar o campo SYNC_DASH
+    tabelas_cadastro = ['PRODUTO', 'PESSOA', 'VENDEDOR', 'GRUPO', 'SECAO', 'FORMAPAG', 'FABRICANTE']
     tabelas_movimento = ['SAIDA', 'SAIDA_PRODUTO', 'SAIDA_FORMAPAG']
     todas_tabelas = tabelas_cadastro + tabelas_movimento
 
+    # Verifica se já está instalado (testando na tabela PRODUTO)
     precisa_instalar = False
-    try: cursor.execute("SELECT FIRST 1 SYNC_DASH FROM PRODUTO")
+    try: cursor.execute("SELECT FIRST 1 SYNC_DASH FROM PRODUTO"); conn.commit()
     except: precisa_instalar = True
-    conn.commit()
 
+    # Se já tem em produto, verifica se as tabelas novas (FABRICANTE/FORMAPAG) também têm
     if not precisa_instalar:
-        print(">> Banco já configurado.", flush=True); conn.close(); return
+        for tbl_nova in ['FABRICANTE', 'FORMAPAG']:
+            try: 
+                cursor.execute(f"SELECT FIRST 1 SYNC_DASH FROM {tbl_nova}")
+                conn.commit()
+            except:
+                print(f">> Atualizando estrutura da tabela {tbl_nova}...", flush=True)
+                try:
+                    cursor.execute(f"ALTER TABLE {tbl_nova} ADD SYNC_DASH CHAR(1) DEFAULT 'N'")
+                    cursor.execute(f"""
+                        CREATE OR ALTER TRIGGER TG_SYNC_{tbl_nova} FOR {tbl_nova}
+                        ACTIVE BEFORE INSERT OR UPDATE POSITION 0
+                        AS BEGIN
+                            IF (NEW.SYNC_DASH IS DISTINCT FROM 'S') THEN NEW.SYNC_DASH = 'N';
+                        END
+                    """)
+                    conn.commit()
+                except Exception as e: print(f"Erro ao atualizar {tbl_nova}: {e}")
+        
+        print(">> Banco verificado.", flush=True); conn.close(); return
 
     print("\n" + "="*50)
     print(" DETECTADA PRIMEIRA EXECUÇÃO - CONFIGURANDO BANCO")
@@ -114,8 +116,10 @@ def verificar_e_configurar_banco():
 
     print(f"\n3. Marcando registros (Corte: {data_input})...")
     for tbl in tabelas_cadastro:
-        cursor.execute(f"UPDATE {tbl} SET SYNC_DASH = 'N'")
-        conn.commit()
+        try:
+            cursor.execute(f"UPDATE {tbl} SET SYNC_DASH = 'N'")
+            conn.commit()
+        except Exception as e: print(f"Erro update inicial {tbl}: {e}")
 
     cursor.execute(f"UPDATE SAIDA SET SYNC_DASH = 'N' WHERE DATA >= '{data_str}'")
     cursor.execute(f"UPDATE SAIDA_PRODUTO SP SET SYNC_DASH = 'N' WHERE EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SP.ID_SAIDA AND S.DATA >= '{data_str}')")
@@ -141,7 +145,10 @@ def row_to_dict(row, col_names):
     for i, col in enumerate(col_names):
         key = col.lower().strip()
         val = limpar_valor(row[i])
-        campos_texto = ['id_grupo', 'id_secao', 'id_filial', 'id_cliente', 'id_vendedor', 'id_transportadora', 'id_formapag', 'tipo']
+        # Lista de campos que devem ser string
+        campos_texto = ['id_grupo', 'id_secao', 'id_filial', 'id_cliente', 
+                       'id_vendedor', 'id_transportadora', 'id_formapag', 
+                       'tipo', 'id_fabricante', 'id_fornecedor'] 
         if key in campos_texto and val is not None: val = str(val)
         data[key] = val
     
@@ -152,156 +159,129 @@ def row_to_dict(row, col_names):
 
 def enviar_lote(endpoint, payload):
     try:
-        url = f"{API_URL}{endpoint}"
-        r = requests.post(url, json=payload, headers={"Authorization": f"Bearer {TOKEN}"}, timeout=120)
+        r = requests.post(f"{API_URL}{endpoint}", json=payload, headers={"Authorization": f"Bearer {TOKEN}"}, timeout=120)
         return r.status_code == 200
-    except Exception as e:
-        print(f"   [ERRO POST]: {e}", flush=True); return False
+    except: return False
 
-def marcar_como_sincronizado(tabela_sql, ids_processados, campo_id="ID"):
-    if not ids_processados: return
+def marcar_como_sincronizado(tabela_sql, ids, campo_id="ID"):
+    if not ids: return
     conn = get_connection()
     if not conn: return
     cursor = conn.cursor()
     try:
-        sql_update = f"UPDATE {tabela_sql} SET SYNC_DASH = 'S' WHERE {campo_id} = ?"
-        params = [(x,) for x in ids_processados]
-        cursor.executemany(sql_update, params)
+        cursor.executemany(f"UPDATE {tabela_sql} SET SYNC_DASH = 'S' WHERE {campo_id} = ?", [(x,) for x in ids])
         conn.commit()
-    except Exception as e:
-        print(f"   [ERRO UPDATE LOCAL]: {e}"); conn.rollback()
+    except Exception as e: print(f"Erro Update: {e}"); conn.rollback()
     finally: conn.close()
 
-# --- SINCRONIZAÇÃO NORMAL (INSERT/UPDATE) ---
+# --- SYNC GENÉRICO ---
 def sync_controle_banco(nome_tabela, endpoint, tabela_sql, colunas_sql="*", campo_id="ID", filtro_extra=""):
     print(f"[{nome_tabela}]", end=" ", flush=True)
-    
-    where_clause = "WHERE SYNC_DASH = 'N'"
-    if filtro_extra:
-        where_clause += f" AND {filtro_extra}"
-    
-    sql = f"SELECT FIRST {TAMANHO_LOTE} {colunas_sql} FROM {tabela_sql} {where_clause}"
+    where = "WHERE SYNC_DASH = 'N'"
+    if filtro_extra: where += f" AND {filtro_extra}"
     
     conn = get_connection()
     if not conn: return False
     cursor = conn.cursor()
     try:
-        cursor.execute(sql)
+        cursor.execute(f"SELECT FIRST {TAMANHO_LOTE} {colunas_sql} FROM {tabela_sql} {where}")
         rows = cursor.fetchall()
-        col_names = [desc[0] for desc in cursor.description]
-    except Exception as e:
-        print(f"Erro SQL: {e}"); conn.close(); return False
+        col_names = [d[0] for d in cursor.description] # Nomes das colunas retornadas pelo banco (respeita o AS alias)
+    except Exception as e: print(f"Erro SQL {tabela_sql}: {e}"); conn.close(); return False
     conn.close()
 
-    if not rows:
-        print(".", end="", flush=True); return False
+    if not rows: print(".", end="", flush=True); return False
 
     payload = []
-    ids_para_atualizar = []
-    
+    ids_upd = []
     for r in rows:
         d = row_to_dict(r, col_names)
-        val_id = None
-        col_cursor = campo_id.lower().split('.')[-1]
-        
-        if col_cursor in d: val_id = d[col_cursor]
-        elif 'id_original' in d: val_id = d['id_original']
-             
-        if val_id: ids_para_atualizar.append(val_id)
-        d.pop('rdb$db_key', None); d.pop('sync_dash', None) 
+        val_id = d.get(campo_id.lower().split('.')[-1]) or d.get('id_original')
+        if val_id: ids_upd.append(val_id)
+        d.pop('sync_dash', None); d.pop('rdb$db_key', None)
         payload.append(d)
 
     print(f"Enviando {len(payload)}...", end=" ", flush=True)
-    
     if enviar_lote(endpoint, payload):
-        marcar_como_sincronizado(tabela_sql, ids_para_atualizar, campo_id)
-        print("OK!", flush=True)
-        return True
+        marcar_como_sincronizado(tabela_sql, ids_upd, campo_id)
+        print("OK!", flush=True); return True
     else:
-        print("Falha API.", flush=True)
-        return False
+        print("Falha API.", flush=True); return False
 
-# --- PROCESSAR DELEÇÕES ---
+# --- DELEÇÃO ---
 def verificar_vendas_excluidas():
-    conn = get_connection()
+    conn = get_connection(); 
     if not conn: return False
     cursor = conn.cursor()
-    
     try:
         cursor.execute(f"SELECT FIRST {TAMANHO_LOTE} ID FROM SAIDA WHERE ELIMINADO = 'S' AND SYNC_DASH = 'N'")
         rows = cursor.fetchall()
+        if not rows: conn.close(); return False
         
-        if not rows: 
-            conn.close(); return False
-
-        print(f"[DELECAO] Encontradas {len(rows)} vendas eliminadas...", end=" ", flush=True)
+        ids = [str(r[0]) for r in rows]
+        print(f"[DELECAO] {len(ids)} vendas...", end=" ", flush=True)
+        enviados = []
+        for i in ids:
+            if enviar_lote("/api/sync/deletar-venda", {"id_original": i}): enviados.append(i)
         
-        ids_sucesso = []
-        for r in rows:
-            id_venda = str(r[0])
-            payload = {"id_original": id_venda}
-            if enviar_lote("/api/sync/deletar-venda", payload):
-                ids_sucesso.append(id_venda)
-        
-        conn.close() 
-        
-        if ids_sucesso:
-            marcar_como_sincronizado("SAIDA", ids_sucesso, "ID")
-            print(f"Processadas: {len(ids_sucesso)} OK!")
-            return True
-        else:
-            print("Falha ao enviar.")
-            return False
-
-    except Exception as e:
-        print(f"Erro Check Deleção: {e}"); conn.close(); return False
+        if enviados: marcar_como_sincronizado("SAIDA", enviados, "ID")
+        conn.close(); return len(enviados) > 0
+    except: conn.close(); return False
 
 # --- LOOP PRINCIPAL ---
 if __name__ == "__main__":
     verificar_e_configurar_banco()
-    print(f"\n--- AGENTE EM EXECUÇÃO ---", flush=True)
-    print(f"Modo Ocioso: {DELAY_OCIOSO}s | Modo Ativo (Intervalo): {DELAY_ENTRE_LOTES}s")
+    print(f"\n--- AGENTE RODANDO ---", flush=True)
     
     while True:
         try:
-            dados_encontrados = False
-            
-            # 1. Verifica deleções
-            if verificar_vendas_excluidas(): dados_encontrados = True
+            encontrou = False
+            if verificar_vendas_excluidas(): encontrou = True
 
-            # 2. Cadastros
-            if sync_controle_banco("PRODUTO", "/api/sync/cadastros/produto", "PRODUTO", "ID, NOME, PRECO_VENDA, CUSTO_TOTAL, ID_GRUPO, ATIVO, SYNC_DASH", "ID"): dados_encontrados = True
-            if sync_controle_banco("CLIENTE", "/api/sync/cadastros/cliente", "PESSOA", "ID, NOME, CNPJ_CPF, CIDADE, ATIVO, SYNC_DASH", "ID"): dados_encontrados = True
-            if sync_controle_banco("VENDEDOR", "/api/sync/cadastros/vendedor", "VENDEDOR", "ID, NOME, COMISSAO, ATIVO, SYNC_DASH", "ID"): dados_encontrados = True
-            if sync_controle_banco("GRUPO", "/api/sync/cadastros/grupo", "GRUPO", "ID, GRUPO, ID_SECAO, SYNC_DASH", "ID"): dados_encontrados = True
-            if sync_controle_banco("SECAO", "/api/sync/cadastros/secao", "SECAO", "ID, SECAO, SYNC_DASH", "ID"): dados_encontrados = True
+            # --- CADASTROS (COM ALIAS 'AS NOME' PARA CORRIGIR ESTRUTURA) ---
             
-            # 3. Movimento (Vendas)
-            if sync_controle_banco("SAIDA", "/api/sync/saida", "SAIDA", "*", "ID", filtro_extra="(ELIMINADO IS NULL OR ELIMINADO = 'N')"): dados_encontrados = True
+            # PRODUTO (Campos extras ID_FABRICANTE e ID_FORNECEDOR inclusos)
+            cols_prod = "ID, NOME, PRECO_VENDA, CUSTO_TOTAL, ID_GRUPO, ID_FABRICANTE, ID_FORNECEDOR, ATIVO, SYNC_DASH"
+            if sync_controle_banco("PRODUTO", "/api/sync/cadastros/produto", "PRODUTO", cols_prod, "ID"): encontrou = True
             
-            sql_filtro_itens = """
-                EXISTS (SELECT 1 FROM SAIDA S 
-                        WHERE S.ID = SAIDA_PRODUTO.ID_SAIDA 
-                        AND (S.ELIMINADO IS NULL OR S.ELIMINADO = 'N'))
-            """
-            if sync_controle_banco("SAIDA_PRODUTO", "/api/sync/saida_produto", "SAIDA_PRODUTO", "*", "ID", filtro_extra=sql_filtro_itens): dados_encontrados = True
+            # FABRICANTE (Mapeando FABRICANTE -> NOME)
+            if sync_controle_banco("FABRICANTE", "/api/sync/cadastros/fabricante", "FABRICANTE", "ID, FABRICANTE AS NOME, SYNC_DASH", "ID"): encontrou = True
             
-            sql_filtro_pag = """
-                EXISTS (SELECT 1 FROM SAIDA S 
-                        WHERE S.ID = SAIDA_FORMAPAG.ID_SAIDA 
-                        AND (S.ELIMINADO IS NULL OR S.ELIMINADO = 'N'))
-            """
-            if sync_controle_banco("SAIDA_FORMAPAG", "/api/sync/saida_formapag", "SAIDA_FORMAPAG", "*", "ID", filtro_extra=sql_filtro_pag): dados_encontrados = True
+            # CLIENTE/FORNECEDOR (PESSOA)
+            if sync_controle_banco("CLIENTE", "/api/sync/cadastros/cliente", "PESSOA", "ID, NOME, CNPJ_CPF, CIDADE, ATIVO, SYNC_DASH", "ID"): encontrou = True
+            
+            # VENDEDOR
+            if sync_controle_banco("VENDEDOR", "/api/sync/cadastros/vendedor", "VENDEDOR", "ID, NOME, COMISSAO, ATIVO, SYNC_DASH", "ID"): encontrou = True
+            
+            # GRUPO (Mapeando GRUPO -> NOME)
+            if sync_controle_banco("GRUPO", "/api/sync/cadastros/grupo", "GRUPO", "ID, GRUPO AS NOME, ID_SECAO, SYNC_DASH", "ID"): encontrou = True
+            
+            # SECAO (Mapeando SECAO -> NOME)
+            if sync_controle_banco("SECAO", "/api/sync/cadastros/secao", "SECAO", "ID, SECAO AS NOME, SYNC_DASH", "ID"): encontrou = True
+            
+            # FORMAPAG (Mapeando FORMAPAG -> NOME)
+            if sync_controle_banco("FORMAPAG", "/api/sync/cadastros/formapag", "FORMAPAG", "ID, FORMAPAG AS NOME, TIPO, SYNC_DASH", "ID"): encontrou = True
+            
+            # --- MOVIMENTO ---
+            
+            # SAIDA
+            if sync_controle_banco("SAIDA", "/api/sync/saida", "SAIDA", "*", "ID", filtro_extra="(ELIMINADO IS NULL OR ELIMINADO = 'N')"): encontrou = True
+            
+            # ITENS DA SAIDA
+            q_itens = "EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SAIDA_PRODUTO.ID_SAIDA AND (S.ELIMINADO IS NULL OR S.ELIMINADO = 'N'))"
+            if sync_controle_banco("SAIDA_PRODUTO", "/api/sync/saida_produto", "SAIDA_PRODUTO", "*", "ID", filtro_extra=q_itens): encontrou = True
+            
+            # PAGAMENTOS DA SAIDA
+            q_pag = "EXISTS (SELECT 1 FROM SAIDA S WHERE S.ID = SAIDA_FORMAPAG.ID_SAIDA AND (S.ELIMINADO IS NULL OR S.ELIMINADO = 'N'))"
+            if sync_controle_banco("SAIDA_FORMAPAG", "/api/sync/saida_formapag", "SAIDA_FORMAPAG", "*", "ID", filtro_extra=q_pag): encontrou = True
 
-            # --- CONTROLE DE DELAY ---
-            if not dados_encontrados:
-                print(f"\r[Ocioso] Nenhuma pendência. Aguardando {DELAY_OCIOSO}s...   ", end="", flush=True)
-                time.sleep(DELAY_OCIOSO) 
+            # --- DELAYS ---
+            if not encontrou:
+                print(f"\r[Ocioso] Aguardando {DELAY_OCIOSO}s...   ", end="", flush=True)
+                time.sleep(DELAY_OCIOSO)
             else:
-                print(f" [Pausa técnica: {DELAY_ENTRE_LOTES}s]", end="\n", flush=True)
-                time.sleep(DELAY_ENTRE_LOTES) 
-            
-        except KeyboardInterrupt:
-            print("\nParando...", flush=True); break
-        except Exception as e:
-            print(f"\n[ERRO LOOP]: {e}", flush=True); time.sleep(10)
+                print(f" [Pausa {DELAY_ENTRE_LOTES}s]", end="\n", flush=True)
+                time.sleep(DELAY_ENTRE_LOTES)
+
+        except KeyboardInterrupt: break
+        except Exception as e: print(f"\nERRO LOOP: {e}"); time.sleep(10)

@@ -26,10 +26,17 @@ class RankingItem(BaseModel):
     qtd: float
 
 # --- UTILS ---
-def verificar_tabela(cursor, schema, tabela, coluna):
+def verificar_tabela(cursor, schema, tabela, coluna=None):
     try:
-        cursor.execute(f"SELECT 1 FROM information_schema.columns WHERE table_schema='{schema}' AND table_name='{tabela}' AND column_name='{coluna}'")
-        return cursor.fetchone() is not None
+        sql = f"SELECT 1 FROM information_schema.tables WHERE table_schema='{schema}' AND table_name='{tabela}'"
+        cursor.execute(sql)
+        if not cursor.fetchone(): return False
+        
+        if coluna:
+            sql_col = f"SELECT 1 FROM information_schema.columns WHERE table_schema='{schema}' AND table_name='{tabela}' AND column_name='{coluna}'"
+            cursor.execute(sql_col)
+            return cursor.fetchone() is not None
+        return True
     except: return False
 
 # --- ENDPOINTS ---
@@ -43,7 +50,7 @@ def get_dashboard_cards(data_inicio: date, data_fim: date, schema: str = Depends
         conn.close()
         return {k:0 for k in DashboardCards.__annotations__}
 
-    # 1. Dados da Venda (Capa)
+    # 1. Dados da Venda (Capa) - CAST para numeric pois o sync sobe como texto
     sql_capa = f"""
         SELECT 
             COALESCE(SUM(NULLIF(total, '')::numeric), 0),
@@ -54,7 +61,7 @@ def get_dashboard_cards(data_inicio: date, data_fim: date, schema: str = Depends
         WHERE "data"::date BETWEEN %s AND %s
     """
     
-    # 2. Dados dos Itens (CMV e Qtde) - JOIN via id_original
+    # 2. Dados dos Itens (CMV e Qtde)
     sql_itens = f"""
         SELECT 
             COALESCE(SUM(NULLIF(sp.quant, '')::numeric), 0),
@@ -77,7 +84,7 @@ def get_dashboard_cards(data_inicio: date, data_fim: date, schema: str = Depends
             if itens:
                 qtd_itens, cmv = float(itens[0]), float(itens[1])
 
-        # Cálculos
+        # Cálculos KPI
         ticket = fat / qtd if qtd > 0 else 0.0
         itens_pv = qtd_itens / qtd if qtd > 0 else 0.0
         lucro = fat - cmv
@@ -115,10 +122,20 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 10, s
         
         elif tipo == "pagamento":
             if not verificar_tabela(cursor, schema, 'saida_formapag', 'valor'): return []
+            
+            # JOIN COM FORMAPAG (Se existir) PARA PEGAR O NOME
+            join_forma = ""
+            col_nome = "sf.id_formapag"
+            
+            if verificar_tabela(cursor, schema, 'formapag', 'nome'):
+                join_forma = f"LEFT JOIN {schema}.formapag f ON sf.id_formapag = f.id_original"
+                col_nome = "COALESCE(f.nome, sf.id_formapag)"
+
             sql = f"""
-                SELECT COALESCE(sf.id_formapag, 'N/D'), SUM(NULLIF(sf.valor, '')::numeric), COUNT(DISTINCT s.id_original)
+                SELECT {col_nome}, SUM(NULLIF(sf.valor, '')::numeric), COUNT(DISTINCT s.id_original)
                 FROM {schema}.saida_formapag sf
                 JOIN {schema}.saida s ON sf.id_saida = s.id_original
+                {join_forma}
                 {where} GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}
             """
         
