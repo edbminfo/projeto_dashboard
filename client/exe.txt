@@ -1,0 +1,1 @@
+pyinstaller --noconsole --onefile --name "Agente_Sync_Dashboard" main_gui.py

@@ -1,4 +1,0 @@
-requests
-firebird-driver
-psycopg2-binary
-configparser

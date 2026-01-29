@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database_utils import init_master_table
 # Importa os 3 roteadores
-from routers import admin, sync, reports 
+from routers import admin, sync, reports , integrity
 
 app = FastAPI(title="Dashboard API Multi-Tenant")
 
@@ -23,6 +23,7 @@ def startup():
 app.include_router(admin.router, prefix="/api")   # Criar Cliente
 app.include_router(sync.router, prefix="/api")    # Receber Dados
 app.include_router(reports.router, prefix="/api") # Gerar Relatórios
+app.include_router(integrity.router, prefix="/api") # <--- CORRIGIDO AQUI
 
 if __name__ == "__main__":
     import uvicorn
