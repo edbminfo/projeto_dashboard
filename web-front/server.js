@@ -72,23 +72,74 @@ app.post('/auth/solicitar', async (req, res) => {
     } catch (erro) { console.error("Erro no login:", erro); res.render('login', { erro: "Erro ao processar login." }); }
 });
 
+// ... (seu código anterior)
+
+// --- ROTA GET: TELA DE VERIFICAÇÃO ---
 app.get('/verificar', (req, res) => {
     if (!req.session.temp_telefone) return res.redirect('/login');
-    res.render('verificar', { telefone: req.session.temp_telefone, erro: null });
+    
+    // Formata a hora atual do servidor para mostrar na tela
+    const horaServidor = new Date().toLocaleString('pt-BR', { 
+        timeZone: 'America/Sao_Paulo',
+        hour12: false,
+        hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+
+    console.log(`[DEBUG] Acessando /verificar. Hora do Node: ${new Date().toISOString()} | Formatada: ${horaServidor}`);
+
+    res.render('verificar', { 
+        telefone: req.session.temp_telefone, 
+        erro: null,
+        horaServidor: horaServidor // Enviando para o front
+    });
 });
 
+// --- ROTA POST: VALIDAR CÓDIGO ---
 app.post('/auth/validar', async (req, res) => {
     const { codigo } = req.body;
+    const telefone = req.session.temp_telefone;
+
     try {
-        const resultado = await pool.query("SELECT * FROM sessoes_login WHERE telefone = $1 AND token_acesso = $2 AND usado = FALSE AND expira_em > NOW()", [req.session.temp_telefone, codigo]);
-        if (resultado.rows.length > 0) {
-            await pool.query("UPDATE sessoes_login SET usado = TRUE WHERE id = $1", [resultado.rows[0].id]);
-            const user = await pool.query("SELECT * FROM usuarios WHERE telefone = $1", [req.session.temp_telefone]);
-            req.session.usuario = user.rows[0];
-            res.redirect('/');
-        } else { res.render('verificar', { telefone: req.session.temp_telefone, erro: "Código inválido." }); }
-    } catch (erro) { console.error(erro); res.redirect('/login'); }
+        // Log para entender o que está acontecendo
+        console.log(`[LOGIN] Tentativa: ${telefone} com código ${codigo}`);
+        
+        // Query de verificação com log
+        const checkQuery = "SELECT * FROM sessoes_login WHERE telefone = $1 AND token_acesso = $2 AND usado = FALSE";
+        const checkResult = await pool.query(checkQuery, [telefone, codigo]);
+
+        if (checkResult.rows.length === 0) {
+            console.log("[LOGIN] Falha: Código não encontrado ou já usado.");
+            return res.render('verificar', { telefone, erro: "Código inválido ou inexistente.", horaServidor: new Date().toLocaleString() });
+        }
+
+        const sessao = checkResult.rows[0];
+        const agora = new Date(); // Hora do Node (com Fuso ajustado pelo Docker)
+        const expira = new Date(sessao.expira_em); // Hora que veio do Banco
+
+        console.log(`[LOGIN] Comparação de Tempo:`);
+        console.log(`   - Agora (Node):   ${agora.toLocaleString('pt-BR')}`);
+        console.log(`   - Expira (Banco): ${expira.toLocaleString('pt-BR')}`);
+
+        // Validação manual de tempo para garantir
+        if (agora > expira) {
+            console.log("[LOGIN] Falha: Código expirado.");
+            return res.render('verificar', { telefone, erro: "O código expirou. Tente novamente.", horaServidor: agora.toLocaleString('pt-BR') });
+        }
+
+        // Se passou, atualiza e loga
+        await pool.query("UPDATE sessoes_login SET usado = TRUE WHERE id = $1", [sessao.id]);
+        const user = await pool.query("SELECT * FROM usuarios WHERE telefone = $1", [telefone]);
+        req.session.usuario = user.rows[0];
+        console.log("[LOGIN] Sucesso! Redirecionando.");
+        res.redirect('/');
+
+    } catch (erro) {
+        console.error("[ERRO FATAL LOGIN]", erro);
+        res.redirect('/login');
+    }
 });
+
+// ... (resto do código)
 
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });
 
