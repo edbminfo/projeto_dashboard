@@ -1,168 +1,105 @@
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
-import configparser
+import customtkinter as ctk
 import threading
-import os
-import sys
 import time
-from PIL import Image, ImageDraw
-import pystray
+import sys
+from datetime import datetime
+# Importamos as funções do seu script original
+from agente_sync import executar_ciclo_sync, verificar_delecoes, configurar_estrutura_banco, VERSAO, DATA_CORTE, TOKEN
 
-# Importe suas funções lógicas existentes
-from agente_sync import configurar_estrutura_banco, executar_ciclo_sync, verificar_delecoes
+class AgenteSyncGUI(ctk.CTk):
+    def __init__(self):
+        super().__init__()
 
-class AgenteSyncGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Agente Sync Dashboard")
-        self.root.geometry("600x750")
-        self.config_path = 'config.ini'
-        self.running = False
-        self.icon = None
-        
+        self.title(f"Agente Sync Dashboard - v{VERSAO}")
+        self.geometry("600x700")
+        self.is_running = False
+
+        # --- Layout da Interface (Baseado na sua foto) ---
         self.setup_ui()
-        self.carregar_configuracoes()
-        
-        # Lógica de Auto-Início
-        self.verificar_auto_start()
+
+        # --- Inicialização Automática ---
+        self.adicionar_log(f"Configuração detectada. Iniciando automaticamente...")
+        self.iniciar_sincronismo()
 
     def setup_ui(self):
-        # Cabeçalho
-        header = tk.Frame(self.root, bg="#0056b3")
-        header.pack(fill="x")
-        tk.Label(header, text="🔄 Sincronizador de Dados - BM Dashboard", 
-                 fg="white", bg="#0056b3", font=("Arial", 12, "bold")).pack(pady=10)
+        # Frame Identificação
+        self.frame_api = ctk.CTkFrame(self)
+        self.frame_api.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(self.frame_api, text="Identificação (API)", font=("Arial", 12, "bold")).pack(anchor="w", padx=10)
+        self.criar_campo(self.frame_api, "CNPJ:", "11222333000198")
+        self.criar_campo(self.frame_api, "Token:", "********************", show="*")
 
-        # Seção Identificação
-        sec_id = tk.LabelFrame(self.root, text="Identificação (API)", padx=10, pady=5)
-        sec_id.pack(fill="x", padx=10, pady=5)
+        # Frame Banco de Dados
+        self.frame_db = ctk.CTkFrame(self)
+        self.frame_db.pack(fill="x", padx=20, pady=10)
+        ctk.CTkLabel(self.frame_db, text="Configuração Firebird / DB", font=("Arial", 12, "bold")).pack(anchor="w", padx=10)
+        self.criar_campo(self.frame_db, "Tipo:", "FIREBIRD")
+        self.criar_campo(self.frame_db, "Host/IP:", "localhost")
+        self.criar_campo(self.frame_db, "Caminho DB:", r"C:\datacash\DADOS\BM.FDB")
+
+        # Botões
+        self.frame_btn = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_btn.pack(fill="x", padx=20, pady=10)
         
-        self.ent_cnpj = self.add_field(sec_id, "CNPJ:", 0)
-        self.ent_token = self.add_field(sec_id, "Token:", 1, show="*")
-
-        # Seção Banco de Dados (Mais Completa)
-        sec_db = tk.LabelFrame(self.root, text="Configuração Firebird / DB", padx=10, pady=5)
-        sec_db.pack(fill="x", padx=10, pady=5)
-
-        tk.Label(sec_db, text="Tipo:").grid(row=0, column=0, sticky="w")
-        self.cb_tipo = ttk.Combobox(sec_db, values=["FIREBIRD", "POSTGRESQL"])
-        self.cb_tipo.grid(row=0, column=1, sticky="w", padx=5, pady=2)
-
-        self.ent_host = self.add_field(sec_db, "Host/IP:", 1)
-        self.ent_port = self.add_field(sec_db, "Porta:", 2)
-        self.ent_path = self.add_field(sec_db, "Caminho DB (.fdb):", 3)
-        self.ent_user = self.add_field(sec_db, "Usuário DB:", 4)
-        self.ent_pass = self.add_field(sec_db, "Senha DB:", 5, show="*")
-
-        # Botões de Ação
-        btn_frame = tk.Frame(self.root)
-        btn_frame.pack(pady=10)
+        self.btn_acao = ctk.CTkButton(self.frame_btn, text="PARAR", fg_color="#d35400", command=self.toggle_sync)
+        self.btn_acao.pack(side="left", expand=True, padx=5)
         
-        tk.Button(btn_frame, text="💾 Salvar Config", command=self.salvar_configuracoes, width=15).pack(side="left", padx=5)
-        self.btn_control = tk.Button(btn_frame, text="▶️ INICIAR", bg="#28a745", fg="white", command=self.toggle_sync, width=15)
-        self.btn_control.pack(side="left", padx=5)
-        tk.Button(btn_frame, text="⏬ Ocultar", command=self.minimizar_para_tray, width=15).pack(side="left", padx=5)
+        ctk.CTkButton(self.frame_btn, text="Ocultar", command=self.withdraw).pack(side="left", expand=True, padx=5)
 
-        # Console de Logs
-        self.txt_log = scrolledtext.ScrolledText(self.root, height=12, bg="#1e1e1e", fg="#d4d4d4", font=("Consolas", 9))
-        self.txt_log.pack(fill="both", padx=10, pady=10)
+        # Terminal de Log (Preto com letras verdes como na foto)
+        self.txt_log = ctk.CTkTextbox(self, height=250, fg_color="black", text_color="#2ecc71", font=("Consolas", 12))
+        self.txt_log.pack(fill="both", expand=True, padx=20, pady=10)
 
-    def add_field(self, parent, label, row, show=None):
-        tk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
-        entry = tk.Entry(parent, width=55, show=show)
-        entry.grid(row=row, column=1, padx=5, pady=2)
-        return entry
+    def criar_campo(self, master, label, valor, show=None):
+        f = ctk.CTkFrame(master, fg_color="transparent")
+        f.pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(f, text=label, width=100, anchor="w").pack(side="left")
+        e = ctk.CTkEntry(f, show=show)
+        e.insert(0, valor)
+        e.pack(side="left", fill="x", expand=True)
 
-    def log(self, msg):
-        timestamp = time.strftime("%H:%M:%S")
-        self.txt_log.insert(tk.END, f"[{timestamp}] {msg}\n")
-        self.txt_log.see(tk.END)
+    def adicionar_log(self, mensagem):
+        timestamp = datetime.now().strftime("[%H:%M:%S]")
+        self.txt_log.insert("end", f"{timestamp} {mensagem}\n")
+        self.txt_log.see("end")
 
-    def carregar_configuracoes(self):
-        config = configparser.ConfigParser()
-        if os.path.exists(self.config_path):
-            config.read(self.config_path)
-            self.ent_cnpj.insert(0, config.get('ID', 'cnpj', fallback=''))
-            self.ent_token.insert(0, config.get('API', 'token_loja', fallback=''))
-            self.cb_tipo.set(config.get('DB', 'type', fallback='FIREBIRD'))
-            self.ent_host.insert(0, config.get('DB', 'host', fallback='localhost'))
-            self.ent_port.insert(0, config.get('DB', 'port', fallback='3050'))
-            self.ent_path.insert(0, config.get('DB', 'path', fallback=''))
-            self.ent_user.insert(0, config.get('DB', 'user', fallback='SYSDBA'))
-            self.ent_pass.insert(0, config.get('DB', 'pass', fallback='masterkey'))
-
-    def salvar_configuracoes(self):
-        config = configparser.ConfigParser()
-        config['ID'] = {'cnpj': self.ent_cnpj.get()}
-        config['API'] = {'token_loja': self.ent_token.get(), 'url_base': 'https://api-dash.bmhelp.click'}
-        config['DB'] = {
-            'type': self.cb_tipo.get(),
-            'host': self.ent_host.get(),
-            'port': self.ent_port.get(),
-            'path': self.ent_path.get(),
-            'user': self.ent_user.get(),
-            'pass': self.ent_pass.get()
-        }
-        with open(self.config_path, 'w') as f:
-            config.write(f)
-        self.log("Configurações salvas com sucesso.")
-
-    def verificar_auto_start(self):
-        path = self.ent_path.get()
-        if path and os.path.exists(path):
-            self.log("Configuração detectada. Iniciando automaticamente...")
-            self.root.after(1000, self.toggle_sync) # Inicia o sync
-            self.root.after(2000, self.minimizar_para_tray) # Minimiza
-        else:
-            self.log("Aguardando configuração manual do banco de dados.")
-
-    def loop_sincronismo(self):
-        while self.running:
-            try:
-                # Aqui chama as funções do seu agente_sync.py
-                executar_ciclo_sync()
-                verificar_delecoes()
-                time.sleep(10) # Intervalo entre ciclos
-            except Exception as e:
-                self.log(f"Erro no ciclo: {e}")
-                time.sleep(30)
+    def iniciar_sincronismo(self):
+        if not self.is_running:
+            self.is_running = True
+            self.btn_acao.configure(text="PARAR", fg_color="#d35400")
+            # Executa a manutenção inicial e o loop em Background
+            threading.Thread(target=self.trabalho_sync, daemon=True).start()
 
     def toggle_sync(self):
-        if not self.running:
-            self.running = True
-            self.btn_control.config(text="🛑 PARAR", bg="#dc3545")
-            self.log("Serviço de sincronização INICIADO.")
-            threading.Thread(target=self.loop_sincronismo, daemon=True).start()
+        if self.is_running:
+            self.is_running = False
+            self.btn_acao.configure(text="INICIAR", fg_color="#27ae60")
+            self.adicionar_log("Serviço de sincronização PARADO.")
         else:
-            self.running = False
-            self.btn_control.config(text="▶️ INICIAR", bg="#28a745")
-            self.log("Serviço de sincronização PARADO.")
+            self.iniciar_sincronismo()
+            self.adicionar_log("Serviço de sincronização REINICIADO.")
 
-    def minimizar_para_tray(self):
-        self.root.withdraw()
-        # Cria ícone simples para o Tray
-        image = Image.new('RGB', (64, 64), color=(0, 86, 179))
-        d = ImageDraw.Draw(image)
-        d.text((10, 20), "SYNC", fill=(255, 255, 255))
-        
-        menu = (pystray.MenuItem('Abrir', self.restaurar_janela),
-                pystray.MenuItem('Sair', self.encerrar_total))
-        self.icon = pystray.Icon("agente", image, "BM Sync Agente", menu)
-        threading.Thread(target=self.icon.run, daemon=True).start()
+    def trabalho_sync(self):
+        """Este método substitui o 'while True' do seu agente_sync.py original"""
+        configurar_estrutura_banco() #
+        self.adicionar_log("Serviço de sincronização INICIADO.")
 
-    def restaurar_janela(self):
-        if self.icon:
-            self.icon.stop()
-        self.root.deiconify()
+        while self.is_running:
+            try:
+                fez_algo = False
+                # Aqui chamamos as funções do seu arquivo original
+                if executar_ciclo_sync(): fez_algo = True #
+                if verificar_delecoes(): fez_algo = True #
 
-    def encerrar_total(self):
-        self.running = False
-        if self.icon:
-            self.icon.stop()
-        self.root.destroy()
-        sys.exit(0)
+                if not fez_algo:
+                    time.sleep(30) # Delay ocioso
+                else:
+                    self.adicionar_log("Dados enviados com sucesso! ✅")
+                    time.sleep(1) # Delay entre lotes
+            except Exception as e:
+                self.adicionar_log(f"ERRO: {str(e)}")
+                time.sleep(10)
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = AgenteSyncGUI(root)
-    root.mainloop()
+    app = AgenteSyncGUI()
+    app.mainloop()
