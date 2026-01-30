@@ -107,7 +107,17 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
                     {where_saida} GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}
                 """
         elif tipo == "hora":
-            sql = f"""SELECT EXTRACT(HOUR FROM s."data")::text || 'h', SUM(NULLIF(s.total, '')::numeric), COUNT(*) FROM {schema}.saida s {where_saida} GROUP BY 1 ORDER BY 1 ASC"""
+            # CORREÇÃO: Expressão de extração incluída no GROUP BY para evitar erro de sintaxe
+            sql = f"""
+                SELECT 
+                    EXTRACT(HOUR FROM (s."data"::date + s."hora"::time))::text || 'h', 
+                    SUM(NULLIF(s.total, '')::numeric), 
+                    COUNT(*) 
+                FROM {schema}.saida s 
+                {where_saida} 
+                GROUP BY EXTRACT(HOUR FROM (s."data"::date + s."hora"::time))
+                ORDER BY EXTRACT(HOUR FROM (s."data"::date + s."hora"::time)) ASC
+            """
         elif tipo == "dia":
             sql = f"""SELECT TO_CHAR(s."data", 'DD/MM/YYYY'), SUM(NULLIF(s.total, '')::numeric), COUNT(*) FROM {schema}.saida s {where_saida} GROUP BY s."data"::date, 1 ORDER BY s."data"::date ASC"""
         elif tipo == "pagamento":
@@ -117,9 +127,18 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
                 if verificar_tabela(cursor, schema, 'formapag'):
                     join_forma = f"LEFT JOIN {schema}.formapag f ON sf.id_formapag = f.id_original"
                     nome_col = "COALESCE(f.nome, sf.id_formapag)"
-                sql = f"""SELECT {nome_col}, SUM(NULLIF(sf.valor, '')::numeric), COUNT(DISTINCT s.id_original) FROM {schema}.saida_formapag sf JOIN {schema}.saida s ON sf.id_saida = s.id_original {join_forma} {where_saida} GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}"""
+                
+                # CORREÇÃO: Filtro para ignorar a forma de pagamento 'TROCO'
+                sql = f"""
+                    SELECT {nome_col}, SUM(NULLIF(sf.valor, '')::numeric), COUNT(DISTINCT s.id_original) 
+                    FROM {schema}.saida_formapag sf 
+                    JOIN {schema}.saida s ON sf.id_saida = s.id_original 
+                    {join_forma} 
+                    {where_saida} 
+                    AND {nome_col} <> 'TROCO'
+                    GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}
+                """
         
-        # --- NOVO: VENDAS POR TERMINAL ---
         elif tipo == "terminal":
             if verificar_tabela(cursor, schema, 'saida', 'terminal'):
                 sql = f"""
@@ -129,12 +148,10 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
                     GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}
                 """
                 
-        # --- NOVO: VENDAS POR USUARIO ---
         elif tipo == "usuario":
             if verificar_tabela(cursor, schema, 'saida', 'id_usuario'):
                 col_nome = "s.id_usuario"
                 join_user = ""
-                # Se existir a tabela de usuários do PDV, tenta buscar o nome
                 if verificar_tabela(cursor, schema, 'usuario_pdv', 'nome'):
                     join_user = f"LEFT JOIN {schema}.usuario_pdv u ON s.id_usuario = u.id_original"
                     col_nome = "COALESCE(u.nome, s.id_usuario)"
@@ -147,11 +164,6 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
                     GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}
                 """
 
-        # Demais relatórios (Secao, Grupo, etc) mantidos implicitamente pela lógica anterior,
-        # adicionei apenas os novos acima para brevidade, mas o arquivo completo deve ter todos.
-        # ... (insira aqui os blocos secao, grupo, fabricante, fornecedor, cliente, vendedor do código anterior) ...
-        # (Vou colocar todos aqui para garantir que você copie e cole e funcione tudo)
-        
         elif tipo == "secao":
             if verificar_tabela(cursor, schema, 'secao'):
                 sql = f"""SELECT COALESCE(sec.nome, 'N/D'), SUM(NULLIF(sp.total, '')::numeric), SUM(NULLIF(sp.quant, '')::numeric) FROM {schema}.saida_produto sp JOIN {schema}.saida s ON sp.id_saida = s.id_original LEFT JOIN {schema}.produto p ON sp.id_produto = p.id_original LEFT JOIN {schema}.grupo g ON p.id_grupo = g.id_original LEFT JOIN {schema}.secao sec ON g.id_secao = sec.id_original {where_saida} GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}"""

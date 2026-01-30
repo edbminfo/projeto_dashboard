@@ -62,13 +62,13 @@
                     <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=mes">Este Mês</a></li>
                     <li><hr class="dropdown-divider"></li>
                     <li><a class="dropdown-item fw-bold" href="?loja_id=<%= lojaId %>&periodo=todos">Todo o Histórico</a></li>
+                    <li><a class="dropdown-item fw-bold text-primary" href="#" data-bs-toggle="modal" data-bs-target="#modalData">Personalizado...</a></li>
                 </ul>
             </div>
         </div>
     </div>
 
     <div class="container">
-        
         <% if (dados.length > 0) { %>
         <div class="chart-card">
             <canvas id="graficoRelatorio"></canvas>
@@ -89,8 +89,7 @@
                         <% if (dados.length === 0) { %>
                             <tr><td colspan="3" class="text-center py-5 text-muted">Nenhum dado encontrado neste período.</td></tr>
                         <% } else { 
-                            let maxVal = Math.max(...dados.map(d => d.total));
-                        %>
+                            let maxVal = Math.max(...dados.map(d => d.total)); %>
                             <% dados.forEach(function(item) { %>
                                 <tr>
                                     <td class="ps-4 py-3">
@@ -120,6 +119,34 @@
         </div>
     </div>
 
+    <div class="modal fade" id="modalData" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">Período Personalizado</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form action="/relatorios/<%= tipo %>" method="GET">
+                        <input type="hidden" name="loja_id" value="<%= lojaId %>">
+                        <input type="hidden" name="periodo" value="personalizado">
+                        <div class="mb-3">
+                            <label class="form-label fw-bold text-muted">Data Inicial</label>
+                            <input type="date" name="data_inicio" class="form-control form-control-lg" required value="<%= dIni %>">
+                        </div>
+                        <div class="mb-4">
+                            <label class="form-label fw-bold text-muted">Data Final</label>
+                            <input type="date" name="data_fim" class="form-control form-control-lg" required value="<%= dFim %>">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 btn-lg shadow-sm">
+                            <i class="fas fa-filter me-2"></i> Filtrar
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="offcanvas offcanvas-start" tabindex="-1" id="menuLateral">
         <div class="offcanvas-header bg-primary text-white">
             <h5 class="offcanvas-title fw-bold">Menu</h5>
@@ -136,8 +163,15 @@
                 <a href="/relatorios/secao?<%= qParams %>" class="menu-item"><i class="fas fa-tags me-2"></i> Vendas por Seção</a>
                 <a href="/relatorios/grupo?<%= qParams %>" class="menu-item"><i class="fas fa-layer-group me-2"></i> Vendas por Grupo</a>
                 <a href="/relatorios/fabricante?<%= qParams %>" class="menu-item"><i class="fas fa-industry me-2"></i> Vendas por Fabricante</a>
+                <a href="/relatorios/fornecedor?<%= qParams %>" class="menu-item"><i class="fas fa-truck me-2"></i> Vendas por Fornecedor</a>
+                <a href="/relatorios/cliente?<%= qParams %>" class="menu-item"><i class="fas fa-users me-2"></i> Principais Clientes</a>
                 <a href="/relatorios/terminal?<%= qParams %>" class="menu-item"><i class="fas fa-desktop me-2"></i> Vendas por Terminal</a>
                 <a href="/relatorios/usuario?<%= qParams %>" class="menu-item"><i class="fas fa-user-tag me-2"></i> Vendas por Usuário</a>
+                <a href="/relatorios/vendedor?<%= qParams %>" class="menu-item"><i class="fas fa-user-tie me-2"></i> Vendas por Vendedor</a>
+            </div>
+            <div style="border-top: 5px solid #f0f2f5;"></div>
+            <div class="py-2">
+                <a href="/logout" class="menu-item text-danger"><i class="fas fa-sign-out-alt me-2"></i> Sair do Sistema</a>
             </div>
         </div>
     </div>
@@ -148,31 +182,19 @@
     <script>
         const ctx = document.getElementById('graficoRelatorio').getContext('2d');
         const tipoRelatorio = "<%= tipo %>";
-        
-        // Pega os dados do EJS e transforma em JSON para o JS
         const dadosRaw = <%- JSON.stringify(dados) %>;
-        
-        // Limita a 10 itens no gráfico para não poluir (mas a tabela mostra tudo)
         const dadosGrafico = dadosRaw.slice(0, 10);
-        
         const labels = dadosGrafico.map(item => item.nome);
         const valores = dadosGrafico.map(item => item.total);
-
-        // Define o tipo de gráfico com base no relatório
-        // Categorias = Pizza (Pie) | Tempo/Ranking = Barra (Bar)
         let tipoChart = 'bar';
         let usarEixoY = true;
-        
+
         if (['pagamento', 'secao', 'grupo', 'fabricante', 'familia', 'fornecedor'].includes(tipoRelatorio)) {
-            tipoChart = 'doughnut'; // Ou 'pie'
+            tipoChart = 'doughnut';
             usarEixoY = false;
         }
 
-        // Gera cores aleatórias bonitas
-        const backgroundColors = [
-            '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', 
-            '#858796', '#5a5c69', '#f8f9fc', '#2e59d9', '#17a673'
-        ];
+        const backgroundColors = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69', '#f8f9fc', '#2e59d9', '#17a673'];
 
         new Chart(ctx, {
             type: tipoChart,
@@ -189,40 +211,22 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: {
-                        display: !usarEixoY, // Mostra legenda só se for pizza
-                        position: 'bottom'
-                    },
+                    legend: { display: !usarEixoY, position: 'bottom' },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
                                 let label = context.label || '';
                                 if (label) { label += ': '; }
-                                if (context.parsed.y !== null) {
-                                    label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(context.parsed.y || context.parsed);
-                                } else {
-                                    // Para gráficos de pizza onde o valor é direto
-                                    label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(context.raw);
-                                }
+                                let val = context.parsed.y !== undefined ? context.parsed.y : context.raw;
+                                label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
                                 return label;
                             }
                         }
                     }
                 },
                 scales: usarEixoY ? {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return 'R$ ' + value.toLocaleString('pt-BR');
-                            }
-                        }
-                    }
-                } : {
-                    // Remove eixos para gráfico de pizza
-                    x: { display: false },
-                    y: { display: false }
-                }
+                    y: { beginAtZero: true, ticks: { callback: function(value) { return 'R$ ' + value.toLocaleString('pt-BR'); } } }
+                } : { x: { display: false }, y: { display: false } }
             }
         });
     </script>
