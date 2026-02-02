@@ -1,10 +1,9 @@
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends
 from typing import List, Optional
 from pydantic import BaseModel
 from security import validar_token
 from database_utils import get_db_connection
 from datetime import date
-
 
 router = APIRouter()
 
@@ -38,12 +37,7 @@ def verificar_tabela(cursor, schema, tabela, coluna=None):
     except: return False
 
 @router.get("/reports/dashboard-cards", response_model=DashboardCards)
-def get_dashboard_cards(data_inicio: date, data_fim: date, response: Response, schema: str = Depends(validar_token)):
-    # ESTAS LINHAS FORÇAM O NAVEGADOR A BUSCAR DADOS NOVOS SEMPRE
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    response.headers["Expires"] = "0"
-
+def get_dashboard_cards(data_inicio: date, data_fim: date, schema: str = Depends(validar_token)):
     conn = get_db_connection(); cursor = conn.cursor()
     if not verificar_tabela(cursor, schema, 'saida', 'total'):
         conn.close(); return {k:0 for k in DashboardCards.__annotations__}
@@ -55,21 +49,17 @@ def get_dashboard_cards(data_inicio: date, data_fim: date, response: Response, s
             COALESCE(MAX(NULLIF(total, '')::numeric), 0),
             COALESCE(MIN(NULLIF(total, '')::numeric), 0)
         FROM {schema}.saida
-        WHERE "data"::date BETWEEN %s AND %s 
-          AND (eliminado IS NULL OR eliminado = 'N') 
-          AND (normal IS NULL OR normal <> 'N')
+        WHERE "data"::date BETWEEN %s AND %s AND (eliminado IS NULL OR eliminado = 'N')
     """
     
     sql_itens = f"""
         SELECT 
-            COUNT(*),
+            COALESCE(SUM(NULLIF(sp.quant, '')::numeric), 0),
             COALESCE(SUM(NULLIF(sp.quant, '')::numeric * COALESCE(NULLIF(p.custo_total, '')::numeric, 0)), 0)
         FROM {schema}.saida_produto sp
         JOIN {schema}.saida s ON sp.id_saida = s.id_original
         LEFT JOIN {schema}.produto p ON sp.id_produto = p.id_original
-        WHERE s."data"::date BETWEEN %s AND %s 
-          AND (s.eliminado IS NULL OR s.eliminado = 'N') 
-          AND (s.normal IS NULL OR s.normal <> 'N')
+        WHERE s."data"::date BETWEEN %s AND %s AND (s.eliminado IS NULL OR s.eliminado = 'N')
     """
     
     try:
@@ -97,14 +87,14 @@ def get_dashboard_cards(data_inicio: date, data_fim: date, response: Response, s
     except Exception as e:
         print(f"Erro Reports: {e}"); return {k:0 for k in DashboardCards.__annotations__}
     finally: conn.close()
-    
+
 @router.get("/reports/ranking/{tipo}", response_model=List[RankingItem])
 def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, schema: str = Depends(validar_token)):
     conn = get_db_connection(); cursor = conn.cursor()
     if not verificar_tabela(cursor, schema, 'saida', 'total'): conn.close(); return []
 
     sql = ""
-    where_saida = f"WHERE s.\"data\"::date BETWEEN %s AND %s AND (s.eliminado IS NULL OR s.eliminado = 'N') AND (s.normal IS NULL OR s.normal <> 'N')"
+    where_saida = f'WHERE s."data"::date BETWEEN %s AND %s AND (s.eliminado IS NULL OR s.eliminado = \'N\')'
     
     try:
         if tipo == "produto":
