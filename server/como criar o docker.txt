@@ -1,0 +1,8 @@
+# 1. Build da imagem local
+docker build -t dashboard-api .
+
+# 2. Criar a tag para o repositório do GitHub
+docker tag dashboard-api ghcr.io/edbminfo/dashboard-api:latest
+
+
+docker push ghcr.io/edbminfo/dashboard-api:latest

@@ -71,7 +71,7 @@ TABELAS_SYNC = [
     {"nome": "SAIDA", "endpoint": "/api/sync/saida", "sql": "ID, ID_FILIAL, DATA, HORA, TOTAL, ID_CLIENTE, TERMINAL, USUARIO AS ID_USUARIO, ELIMINADO, NUMERO, SERIE, TIPOSAIDA, TIPO, CHAVENFE"},
     
     # SAIDA_PRODUTO e SAIDA_FORMAPAG removidos o campo ID (usaremos a DB_KEY como identificador)
-    {"nome": "SAIDA_PRODUTO", "endpoint": "/api/sync/saida_produto", "sql": "ID_SAIDA, ID_PRODUTO, QUANT, TOTAL"},
+    {"nome": "SAIDA_PRODUTO", "endpoint": "/api/sync/saida_produto", "sql": "ID_SAIDA, ID_PRODUTO, ID_VENDEDOR, QUANT, TOTAL"},
     {"nome": "SAIDA_FORMAPAG", "endpoint": "/api/sync/saida_formapag", "sql": "ID_SAIDA, ID_FORMAPAG, VALOR"},
 ]
 
@@ -97,6 +97,7 @@ def row_to_dict(row, col_names, db_key):
         key = col.lower().strip()
         val = limpar_valor(row[i])
         
+        # Adicione 'id_vendedor' nesta lista abaixo
         campos_string = [
             'id', 'id_filial', 'id_cliente', 'id_usuario', 'id_saida', 'id_produto', 
             'id_formapag', 'terminal', 'numero', 'serie', 'chavenfe', 'id_vendedor'
