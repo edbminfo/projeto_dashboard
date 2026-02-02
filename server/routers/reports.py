@@ -189,10 +189,36 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
         elif tipo == "cliente":
             if verificar_tabela(cursor, schema, 'cliente'):
                 sql = f"""SELECT COALESCE(c.nome, 'CONSUMIDOR'), SUM(NULLIF(s.total, '')::numeric), COUNT(*) FROM {schema}.saida s LEFT JOIN {schema}.cliente c ON s.id_cliente = c.id_original {where_saida} GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}"""
-        elif tipo == "vendedor":
-            if verificar_tabela(cursor, schema, 'vendedor'):
-                sql = f"""SELECT COALESCE(v.nome, 'N/D'), SUM(NULLIF(s.total, '')::numeric), COUNT(*) FROM {schema}.saida s LEFT JOIN {schema}.vendedor v ON s.id_vendedor = v.id_original {where_saida} GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}"""
+        elif tipo == "produto":
+            if verificar_tabela(cursor, schema, 'produto'):
+                sql = f"""
+                    SELECT COALESCE(p.nome, 'N/D'), SUM(NULLIF(sp.total, '')::numeric), SUM(NULLIF(sp.quant, '')::numeric)
+                    FROM {schema}.saida_produto sp
+                    JOIN {schema}.saida s ON sp.id_saida = s.id_original
+                    LEFT JOIN {schema}.produto p ON sp.id_produto = p.id_original
+                    {where_saida} GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}
+                """
+        elif tipo == "hora":
+             sql = f"""SELECT EXTRACT(HOUR FROM (s."data"::date + s."hora"::time))::text || 'h', SUM(NULLIF(s.total, '')::numeric), COUNT(*) FROM {schema}.saida s {where_saida} GROUP BY 1 ORDER BY 1 ASC"""
 
+        elif tipo == "vendedor":
+            # NOVA LÓGICA: Vinculando vendedor através dos itens (saida_produto)
+            if verificar_tabela(cursor, schema, 'vendedor'):
+                sql = f"""
+                    SELECT 
+                        COALESCE(v.nome, 'Vendedor ' || sp.id_vendedor, 'N/D'), 
+                        SUM(NULLIF(sp.total, '')::numeric), 
+                        COUNT(DISTINCT sp.id_saida) 
+                    FROM {schema}.saida_produto sp
+                    JOIN {schema}.saida s ON sp.id_saida = s.id_original
+                    LEFT JOIN {schema}.vendedor v ON sp.id_vendedor = v.id_original 
+                    {where_saida} 
+                    GROUP BY 1 
+                    ORDER BY 2 DESC 
+                    LIMIT {limit}
+                """
+
+        # IMPORTANTE: Esta execução deve estar DENTRO do bloco try
         if sql:
             cursor.execute(sql, (data_inicio, data_fim))
             return [{"nome": str(r[0]), "total": float(r[1]), "qtd": float(r[2])} for r in cursor.fetchall()]
@@ -200,5 +226,9 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
         return []
 
     except Exception as e:
-        print(f"Erro Ranking {tipo}: {e}"); return []
-    finally: conn.close()
+        # Este bloco FECHA o try iniciado lá em cima
+        print(f"Erro Ranking {tipo}: {e}")
+        return []
+    finally:
+        # Este bloco SEMPRE executa para fechar a conexão
+        conn.close()
