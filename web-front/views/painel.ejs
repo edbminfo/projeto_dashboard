@@ -212,7 +212,9 @@
             <div class="col-6 col-md-3">
                 <div class="card-metric">
                     <div class="card-title">Lucro Bruto (%)</div>
-                    <div class="card-value"><%= dados.margem.toLocaleString('pt-BR', {maximumFractionDigits: 2}) %> %</div>
+                   <div class="card-value">
+    <%= (dados.lucro_bruto_percent || 0).toLocaleString('pt-BR', {maximumFractionDigits: 2}) %> %
+</div>
                 </div>
             </div>
 
