@@ -151,7 +151,7 @@ def executar_ciclo_sync():
             sql = f"SELECT FIRST {TAMANHO_LOTE} RDB$DB_KEY, {config_tbl['sql']}, SYNK_DASH_PEND FROM {tabela} WHERE SYNK_DASH_PEND = 'S'"
             
             if tabela == "SAIDA":
-                sql += f" AND DATA >= '{DATA_CORTE}' AND (ELIMINADO IS NULL OR ELIMINADO = 'N')"
+                sql += f" AND DATA >= '{DATA_CORTE}' AND (ELIMINADO IS NULL OR ELIMINADO = 'N') AND (NORMAL IS NULL OR NORMAL <> 'N')"
             
             elif tabela in ["SAIDA_PRODUTO", "SAIDA_FORMAPAG"]:
                 sql += f""" AND EXISTS (
@@ -159,6 +159,7 @@ def executar_ciclo_sync():
                     WHERE SAIDA.ID = {tabela}.ID_SAIDA 
                     AND SAIDA.DATA >= '{DATA_CORTE}' 
                     AND (SAIDA.ELIMINADO IS NULL OR SAIDA.ELIMINADO = 'N')
+                    AND (SAIDA.NORMAL IS NULL OR SAIDA.NORMAL <> 'N')
                 )"""
 
             cursor.execute(sql)
@@ -190,7 +191,7 @@ def verificar_delecoes():
     cursor = conn.cursor()
     
     try:
-        sql = f"SELECT FIRST {TAMANHO_LOTE} RDB$DB_KEY, ID FROM SAIDA WHERE ELIMINADO = 'S' AND SYNK_DASH_PEND = 'S' AND DATA >= '{DATA_CORTE}'"
+        sql = f"SELECT FIRST {TAMANHO_LOTE} RDB$DB_KEY, ID FROM SAIDA WHERE ELIMINADO = 'S' AND SYNK_DASH_PEND = 'S' AND DATA >= '{DATA_CORTE}' AND (NORMAL IS NULL OR NORMAL <> 'N')"
         cursor.execute(sql)
         rows = cursor.fetchall()
         conn.close()
@@ -250,6 +251,7 @@ def configurar_estrutura_banco():
 
     print(f">> Manutenção de integridade (Data Corte: {DATA_CORTE})")
     cursor.execute(f"UPDATE SAIDA SET SYNK_DASH_PEND = 'N' WHERE DATA < '{DATA_CORTE}' AND SYNK_DASH_PEND = 'S'")
+    cursor.execute(f"UPDATE SAIDA SET SYNK_DASH_PEND = 'N' WHERE NORMAL = 'N' AND SYNK_DASH_PEND = 'S'")
     
     sql_limpeza = f"""
         UPDATE {{tabela}} SET SYNK_DASH_PEND = 'N' 
@@ -259,6 +261,7 @@ def configurar_estrutura_banco():
             WHERE SAIDA.ID = {{tabela}}.ID_SAIDA 
             AND SAIDA.DATA >= '{DATA_CORTE}' 
             AND (SAIDA.ELIMINADO IS NULL OR SAIDA.ELIMINADO = 'N')
+            AND (SAIDA.NORMAL IS NULL OR SAIDA.NORMAL <> 'N')
         )
     """
     cursor.execute(sql_limpeza.format(tabela="SAIDA_PRODUTO"))
