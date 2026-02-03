@@ -93,16 +93,34 @@ def limpar_valor(val):
 
 def row_to_dict(row, col_names, db_key):
     data = {}
+    
+    # LISTA DE CAMPOS QUE PRECISAM SER NUMÉRICOS (PONTO DECIMAL)
+    # Adicionamos aqui todos os campos de valor, custo, quantidade e comissão
+    campos_numericos = [
+        'total', 'quant', 'valor', 'preco_venda', 
+        'custo_total', 'comissao'
+    ]
+
+    # LISTA DE CAMPOS QUE DEVEM SER STRING (TEXTO)
+    campos_string = [
+        'id', 'id_filial', 'id_cliente', 'id_usuario', 'id_saida', 'id_produto', 
+        'id_formapag', 'terminal', 'numero', 'serie', 'chavenfe', 'id_vendedor'
+    ]
+
     for i, col in enumerate(col_names):
         key = col.lower().strip()
         val = limpar_valor(row[i])
         
-        # Adicione 'id_vendedor' nesta lista abaixo
-        campos_string = [
-            'id', 'id_filial', 'id_cliente', 'id_usuario', 'id_saida', 'id_produto', 
-            'id_formapag', 'terminal', 'numero', 'serie', 'chavenfe', 'id_vendedor'
-        ]
+        # --- CORREÇÃO DEFINITIVA (VÍRGULA -> PONTO) ---
+        if key in campos_numericos:
+            if isinstance(val, str):
+                val = val.replace(',', '.')
+            # Se vier como Decimal ou Float do banco, garantimos que vira string com ponto
+            if val is not None:
+                val = str(val) 
+        # ----------------------------------------------
         
+        # Garante que IDs sejam strings (sem notação científica ou arredondamentos)
         if key in campos_string and val is not None:
             val = str(val)
             
@@ -113,7 +131,7 @@ def row_to_dict(row, col_names, db_key):
         data['id_original'] = data['id']
         del data['id']
     else:
-        # Se a tabela não tem ID, usamos a DB_KEY (chave física) como identificador único na nuvem
+        # Se a tabela não tem ID, usamos a DB_KEY
         data['id_original'] = limpar_valor(db_key)
         
     return data
