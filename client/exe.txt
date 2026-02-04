@@ -1,1 +1,5 @@
 pyinstaller --noconsole --onefile --icon="logo.ico" --add-data "logo.ico;." --collect-all customtkinter --hidden-import pystray --hidden-import PIL --name "Agente_Sync_Dashboard" main_gui.py
+
+
+
+pyinstaller --noconsole --onefile --icon="logo.ico" --add-data "logo.ico;." --add-data "config.ini;." --collect-all customtkinter --name "AgenteSync" main_gui.py
