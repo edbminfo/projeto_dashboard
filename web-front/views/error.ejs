@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+
+    <title>Erro 500 - BM Dashboard</title>
+
+    <meta name="description" content="" />
+    <link rel="icon" type="image/x-icon" href="/assets/img/favicon/favicon.ico" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap"
+        rel="stylesheet" />
+
+    <link rel="stylesheet" href="/assets/vendor/fonts/iconify-icons.css" />
+    <link rel="stylesheet" href="/assets/vendor/css/core.css" />
+
+    <style>
+        .misc-wrapper {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            text-align: center;
+        }
+
+        .error-code {
+            font-size: 6rem;
+            font-weight: 700;
+            line-height: 1;
+            color: var(--bs-primary);
+        }
+    </style>
+
+    <script src="/assets/vendor/js/helpers.js"></script>
+    <script src="/assets/js/config.js"></script>
+</head>
+
+<body>
+    <div class="container-xxl container-p-y">
+        <div class="misc-wrapper">
+
+            <h2 class="mb-2 mx-2 error-code">500</h2>
+            <h4 class="mb-2 fw-bold">Serviço Indisponível no Momento 🛠️</h4>
+            
+            <p class="mb-4 mx-2 text-muted">
+                Estamos realizando uma manutenção ou enfrentando uma instabilidade técnica.<br>
+                Por favor, aguarde alguns instantes e tente recarregar a página.
+            </p>
+
+            <% if (locals.message) { %>
+                <div class="alert alert-danger mb-4 mx-2" role="alert">
+                    <%= locals.message %>
+                </div>
+            <% } %>
+            
+            <button type="button" class="btn btn-primary mb-4" onclick="window.location.reload()">
+                <i class="bx bx-refresh me-1"></i>
+                Tentar Novamente
+            </button>
+
+        </div>
+    </div>
+
+    <script src="/assets/vendor/js/bootstrap.js"></script>
+    <script src="/assets/vendor/libs/jquery/jquery.js"></script>
+    <script src="/assets/vendor/js/menu.js"></script>
+    <script src="/assets/js/main.js"></script>
+
+    <% if (locals.erro || locals.message) { %>
+        <script>
+            // Passamos o erro do EJS para o JS de forma segura usando JSON.stringify
+            const serverError = <%- JSON.stringify(locals.erro || locals.message) %>;
+            
+            console.group("DETALHES DO ERRO");
+            console.error("Ocorreu um erro no servidor:");
+            console.error(serverError);
+            console.groupEnd();
+        </script>
+    <% } %>
+</body>
+
+</html>

@@ -1,236 +1,877 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
-    <title><%= tituloRelatorio %> - BM Dashboard</title>
-    
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
-    <style>
-        body { background-color: #f0f2f5; font-family: 'Segoe UI', sans-serif; padding-bottom: 40px; }
-        .bm-header { background-color: #1a73e8; color: white; padding: 15px; position: sticky; top: 0; z-index: 1000; }
-        .filter-bar { background: white; padding: 15px; border-bottom: 1px solid #ddd; margin-bottom: 20px; }
-        .table-card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); overflow: hidden; margin-bottom: 20px; }
-        .chart-card { background: white; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); padding: 20px; margin-bottom: 20px; position: relative; height: 400px; display: flex; justify-content: center; }
-        .progress-bar-custom { background-color: #e8f0fe; border-radius: 4px; height: 8px; margin-top: 5px; overflow: hidden; }
-        .progress-fill { background-color: #1a73e8; height: 100%; border-radius: 4px; }
-        .menu-item { padding: 16px 20px; border-bottom: 1px solid #f0f0f0; color: #333; text-decoration: none; display: block; }
-        .menu-item:hover { background: #f8f9fa; color: #1a73e8; }
-        .filter-btn { background: #f8f9fa; border: 1px solid #dee2e6; width: 100%; padding: 10px 15px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
-    </style>
-</head>
-<body>
+<% const lojaAtual=todasLojas.find(l=> l.id == lojaId) || { nome_fantasia:'Selecione'}; %>
+    <!DOCTYPE html>
+    <html lang="pt-br">
 
-    <div class="bm-header d-flex justify-content-between align-items-center">
-        <button class="btn text-white p-0" type="button" data-bs-toggle="offcanvas" data-bs-target="#menuLateral"><i class="fas fa-bars fa-lg"></i></button>
-        <h5 class="m-0 fw-bold"><%= tituloRelatorio %></h5>
-        <a href="javascript:location.reload()" class="btn text-white p-0"><i class="fas fa-sync-alt"></i></a>
-    </div>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>
+            <%= locals.tituloRelatorio || 'Painel' %> - BM Dashboard
+        </title>
 
-    <div class="filter-bar">
-        <div class="container p-0 d-md-flex gap-3">
-            <div class="dropdown flex-fill mb-2 mb-md-0">
-                <button class="filter-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                    <span><i class="fas fa-store me-2 text-primary"></i> <%= nomeLoja %></span>
-                    <i class="fas fa-chevron-down text-muted small"></i>
-                </button>
-                <ul class="dropdown-menu w-100 mt-1">
-                    <% todasLojas.forEach(function(loja) { %>
-                        <li><a class="dropdown-item py-2" href="?loja_id=<%= loja.id %>&periodo=<%= periodo %>"><%= loja.nome_fantasia %></a></li>
-                    <% }); %>
-                </ul>
-            </div>
-            <div class="dropdown flex-fill">
-                <button class="filter-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                    <span><i class="far fa-calendar-alt me-2 text-success"></i> 
-                        <% if(periodo=='hoje') { %> Hoje 
-                        <% } else if(periodo=='ontem') { %> Ontem 
-                        <% } else if(periodo=='7dias') { %> Últimos 7 dias 
-                        <% } else if(periodo=='mes') { %> Este Mês 
-                        <% } else if(periodo=='todos') { %> Todo o Histórico 
-                        <% } else { %> <%= dIni.split('-').reverse().join('/') %> até <%= dFim.split('-').reverse().join('/') %> <% } %>
-                    </span>
-                    <i class="fas fa-chevron-down text-muted small"></i>
-                </button>
-                <ul class="dropdown-menu w-100 mt-1">
-                    <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=hoje">Hoje</a></li>
-                    <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=ontem">Ontem</a></li>
-                    <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=7dias">Últimos 7 dias</a></li>
-                    <li><a class="dropdown-item" href="?loja_id=<%= lojaId %>&periodo=mes">Este Mês</a></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><a class="dropdown-item fw-bold" href="?loja_id=<%= lojaId %>&periodo=todos">Todo o Histórico</a></li>
-                    <li><a class="dropdown-item fw-bold text-primary" href="#" data-bs-toggle="modal" data-bs-target="#modalData">Personalizado...</a></li>
-                </ul>
-            </div>
-        </div>
-    </div>
+        <link rel="icon" type="image/x-icon" href="/assets/img/favicon/favicon.ico" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap"
+            rel="stylesheet" />
+        <link rel="stylesheet" href="/assets/vendor/fonts/iconify-icons.css" />
+        <link rel="stylesheet" href="/assets/vendor/css/core.css" />
 
-    <div class="container">
-        <% if (dados.length > 0) { %>
-        <div class="chart-card">
-            <canvas id="graficoRelatorio"></canvas>
-        </div>
-        <% } %>
+        <script src="/assets/vendor/js/helpers.js"></script>
+        <script src="/assets/js/config.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    </head>
 
-        <div class="table-card">
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead class="bg-light text-secondary">
-                        <tr>
-                            <th class="ps-4 py-3" style="width: 50%;">Descrição</th>
-                            <th class="text-end py-3">Valor (R$)</th>
-                            <th class="text-end pe-4 py-3">Qtde</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <% if (dados.length === 0) { %>
-                            <tr><td colspan="3" class="text-center py-5 text-muted">Nenhum dado encontrado neste período.</td></tr>
-                        <% } else { 
-                            let maxVal = Math.max(...dados.map(d => d.total)); %>
-                            <% dados.forEach(function(item) { %>
-                                <tr>
-                                    <td class="ps-4 py-3">
-                                        <div class="fw-bold text-dark"><%= item.nome %></div>
-                                        <div class="progress-bar-custom">
-                                            <div class="progress-fill" style="width: <%= (item.total / maxVal * 100) %>%"></div>
+    <body>
+        <div class="layout-wrapper layout-content-navbar">
+            <div class="layout-container">
+                <aside id="layout-menu" class="layout-menu menu-vertical menu bg-menu-theme">
+
+                    <div class="app-brand demo">
+                        <a href="/" class="app-brand-link">
+                            <span class="app-brand-logo demo">
+                                <img src="/assets/img/icons/logo.svg" alt="Logo" width="40" height="40" />
+                            </span>
+
+                            <span class="app-brand-text demo menu-text fw-bold ms-2 text-nowrap"
+                                style="font-size: 1.2rem; text-transform: uppercase;">
+                                BM Dashboard
+                            </span>
+                        </a>
+
+                        <div class="layout-menu-toggle menu-link text-large ms-auto">
+                            <i class="bx bx-chevron-left d-block d-xl-none align-middle"></i>
+                        </div>
+                    </div>
+
+                    <div class="menu-divider mt-0"></div>
+                    <div class="menu-inner-shadow"></div>
+
+                    <% const qParams=`loja_id=${lojaId}&periodo=${periodo}&data_inicio=${dIni}&data_fim=${dFim}`; %>
+
+                        <ul class="menu-inner py-1">
+                            <li class="menu-item active open">
+                                <div class="menu-link"
+                                    style="cursor: default; background-color: #00A2C5; color: #E0E0E0;">
+                                    <i class="menu-icon tf-icons bx bx-home-smile"></i>
+                                    <div class="text-truncate" data-i18n="Dashboards">Menu</div>
+                                </div>
+
+                                <ul class="menu-sub" id="menu-relatorios">
+
+                                    <li class="menu-item">
+                                        <a href="/painel?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-chart-line"></i>
+                                            <div class="text-truncate">Painel</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/produto?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-box"></i>
+                                            <div class="text-truncate">Produtos</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/hora?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-clock"></i>
+                                            <div class="text-truncate">Por Hora</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/dia?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-calendar-alt"></i>
+                                            <div class="text-truncate">Por Dia</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/pagamento?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-credit-card"></i>
+                                            <div class="text-truncate">Pagamentos</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/secao?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-tags"></i>
+                                            <div class="text-truncate">Por Seção</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/grupo?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-layer-group"></i>
+                                            <div class="text-truncate">Por Grupo</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/fabricante?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-industry"></i>
+                                            <div class="text-truncate">Fabricantes</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/fornecedor?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-truck"></i>
+                                            <div class="text-truncate">Fornecedores</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/cliente?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-users"></i>
+                                            <div class="text-truncate">Clientes</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/terminal?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-desktop"></i>
+                                            <div class="text-truncate">Terminais</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/usuario?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-user-tag"></i>
+                                            <div class="text-truncate">Usuários</div>
+                                        </a>
+                                    </li>
+
+                                    <li class="menu-item">
+                                        <a href="/relatorios/vendedor?<%= qParams %>" class="menu-link dynamic-link">
+                                            <i class="menu-icon fas fa-user-tie"></i>
+                                            <div class="text-truncate">Vendedores</div>
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>
+
+                            <li class="menu-header small text-uppercase">
+                                <span class="menu-header-text">Sistema</span>
+                            </li>
+
+                            <li class="menu-item">
+                                <a href="/logout" class="menu-link text-danger">
+                                    <i class="menu-icon fas fa-sign-out-alt"></i>
+                                    <div class="text-truncate">Sair</div>
+                                </a>
+                            </li>
+
+                        </ul>
+                </aside>
+
+                <div class="layout-page">
+                    <nav class="layout-navbar container-xxl navbar-detached navbar navbar-expand-xl align-items-center bg-navbar-theme"
+                        id="layout-navbar">
+
+                        <div class="layout-menu-toggle navbar-nav align-items-xl-center me-4 me-xl-0 d-xl-none">
+                            <a class="nav-item nav-link px-0 me-xl-6" href="javascript:void(0)">
+                                <i class="icon-base bx bx-menu icon-md"></i>
+                            </a>
+                        </div>
+
+                        <div class="navbar-nav-right d-flex align-items-center justify-content-between w-100"
+                            id="navbar-collapse">
+
+                            <div>
+                                <h5 class="m-0 fw-bold">
+                                    <%= locals.tituloRelatorio || 'Painel' %>
+                                </h5>
+                            </div>
+
+                            <div class="d-flex align-items-center gap-2">
+
+                                <button type="button"
+                                    class="btn btn-outline-secondary d-flex align-items-center justify-content-center p-2"
+                                    onclick="window.location.reload()" title="Forçar Recarregamento"
+                                    style="width: 38px; height: 38px;"> <i class="bx bx-refresh bx-sm"></i>
+                                </button>
+
+                                <button type="button" class="btn btn-primary d-flex align-items-center"
+                                    data-bs-toggle="modal" data-bs-target="#modalFiltros">
+                                    <i class="bx bx-slider-alt me-md-2"></i> <span
+                                        class="d-none d-md-block">Filtros</span>
+                                </button>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <div class="content-wrapper">
+                        <div class="container-xxl flex-grow-1 container-p-y">
+
+                            <div class="row mb-4">
+                                <div class="col-12">
+                                    <div class="card h-100 border-primary">
+                                        <div class="card-body">
+
+                                            <div class="d-flex justify-content-between align-items-start">
+                                                <div class="d-flex flex-column">
+
+                                                    <div class="mb-2">
+                                                        <span
+                                                            class="badge bg-label-secondary d-inline-flex align-items-center">
+                                                            <i class='bx bx-store me-1'></i>
+                                                            <span class="d-inline-block text-truncate"
+                                                                style="max-width: 200px; vertical-align: bottom;"
+                                                                title="<%= lojaAtual.nome_fantasia %>">
+                                                                <%= lojaAtual.nome_fantasia %>
+                                                            </span>
+                                                        </span>
+                                                    </div>
+
+                                                    <div>
+                                                        <span
+                                                            class="fw-semibold d-block text-muted small text-uppercase mb-1">
+                                                            Período Selecionado
+                                                        </span>
+                                                        <h3 class="card-title mb-1 text-primary text-uppercase">
+                                                            <%= periodo.replace('_', ' ' ) %>
+                                                        </h3>
+                                                    </div>
+
+                                                    <div class="text-muted mt-1">
+                                                        <i class='bx bx-calendar me-1'></i>
+                                                        De <strong>
+                                                            <%= dIni.split('-').reverse().join('/') %>
+                                                        </strong>
+                                                        até <strong>
+                                                            <%= dFim.split('-').reverse().join('/') %>
+                                                        </strong>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div
+                                                class="mt-4 pt-2 border-top d-flex align-items-center text-muted small">
+                                                <i class='bx bx-time-five me-1'></i>
+                                                <span>Atualizado em:
+                                                    <span class="fw-bold text-dark">
+                                                        <%= new Date().toLocaleString('pt-BR') %>
+                                                    </span>
+                                                </span>
+                                            </div>
+
                                         </div>
-                                    </td>
-                                    <td class="text-end fw-bold text-primary">
-                                        <%= item.total.toLocaleString('pt-BR', {minimumFractionDigits: 2}) %>
-                                    </td>
-                                    <td class="text-end pe-4 text-muted">
-                                        <%= item.qtd %>
-                                    </td>
-                                </tr>
-                            <% }); %>
-                        <% } %>
-                    </tbody>
-                </table>
-            </div>
-        </div>
+                                    </div>
+                                </div>
+                            </div>
 
-        <div class="text-center mt-4 mb-3">
-            <a href="/painel?loja_id=<%= lojaId %>" class="btn btn-outline-primary rounded-pill px-4">
-                <i class="fas fa-arrow-left me-2"></i> Voltar ao Painel
-            </a>
-        </div>
-    </div>
+                            <div class="modal fade" id="modalFiltros" data-bs-backdrop="static" tabindex="-1">
+                                <div class="modal-dialog modal-lg">
+                                    <form class="modal-content" onsubmit="return false;">
 
-    <div class="modal fade" id="modalData" tabindex="-1">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content border-0 shadow">
-                <div class="modal-header bg-primary text-white">
-                    <h5 class="modal-title">Período Personalizado</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body p-4">
-                    <form action="/relatorios/<%= tipo %>" method="GET">
-                        <input type="hidden" name="loja_id" value="<%= lojaId %>">
-                        <input type="hidden" name="periodo" value="personalizado">
-                        <div class="mb-3">
-                            <label class="form-label fw-bold text-muted">Data Inicial</label>
-                            <input type="date" name="data_inicio" class="form-control form-control-lg" required value="<%= dIni %>">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">Filtrar Dashboard</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal"
+                                                aria-label="Close"></button>
+                                        </div>
+
+                                        <div class="modal-body">
+
+                                            <div class="row mb-4">
+                                                <div class="col-12">
+                                                    <label for="selectLojaInput" class="form-label fw-bold">Filial /
+                                                        Loja</label>
+                                                    <select class="form-select" id="selectLojaInput">
+                                                        <% todasLojas.forEach(function(loja) { %>
+                                                            <option value="<%= loja.id %>" <%=loja.id==lojaId
+                                                                ? 'selected' : '' %>>
+                                                                <%= loja.nome_fantasia %>
+                                                            </option>
+                                                            <% }); %>
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            <label class="form-label fw-bold d-block mb-3 border-bottom pb-2">Selecione
+                                                o Período</label>
+
+                                            <div class="row g-3">
+
+                                                <div class="col-md-4 border-end">
+                                                    <h6 class="text-primary mb-3 small text-uppercase fw-bold">
+                                                        <i class='bx bx-calendar-check me-1'></i> Por Dias
+                                                    </h6>
+
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radioHoje" value="hoje"
+                                                            <%=periodo=='hoje' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radioHoje">Hoje</label>
+                                                    </div>
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radioOntem" value="ontem"
+                                                            <%=periodo=='ontem' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radioOntem">Ontem</label>
+                                                    </div>
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radio7dias" value="7dias"
+                                                            <%=periodo=='7dias' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radio7dias">Últimos 7
+                                                            Dias</label>
+                                                    </div>
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radio15dias" value="15dias"
+                                                            <%=periodo=='15dias' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radio15dias">Últimos 15
+                                                            Dias</label>
+                                                    </div>
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radio30dias" value="30dias"
+                                                            <%=periodo=='30dias' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radio30dias">Últimos 30
+                                                            Dias</label>
+                                                    </div>
+                                                </div>
+
+                                                <div class="col-md-4 border-end">
+                                                    <h6 class="mb-3 small text-uppercase fw-bold"
+                                                        style="color: #C55300;">
+                                                        <i class='bx bx-calendar-minus me-1'></i> Por Meses
+                                                    </h6>
+
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radioEsteMes" value="mes"
+                                                            <%=periodo=='mes' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radioEsteMes">Este
+                                                            Mês</label>
+                                                    </div>
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radioMesPassado"
+                                                            value="mes_passado" <%=periodo=='mes_passado' ? 'checked'
+                                                            : '' %>>
+                                                        <label class="form-check-label" for="radioMesPassado">Mês
+                                                            Passado</label>
+                                                    </div>
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radio3Meses" value="3meses"
+                                                            <%=periodo=='3meses' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radio3Meses">Últimos 3
+                                                            Meses</label>
+                                                    </div>
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radio6Meses" value="6meses"
+                                                            <%=periodo=='6meses' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radio6Meses">Últimos 6
+                                                            Meses</label>
+                                                    </div>
+                                                </div>
+
+                                                <div class="col-md-4">
+                                                    <h6 class="text-info mb-3 small text-uppercase fw-bold">
+                                                        <i class='bx bx-calendar me-1'></i> Outros
+                                                    </h6>
+
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radioEsteAno" value="este_ano"
+                                                            <%=periodo=='este_ano' ? 'checked' : '' %>>
+                                                        <label class="form-check-label" for="radioEsteAno">Este
+                                                            Ano</label>
+                                                    </div>
+                                                    <div class="form-check custom-option mb-2">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radioAnoPassado"
+                                                            value="ano_passado" <%=periodo=='ano_passado' ? 'checked'
+                                                            : '' %>>
+                                                        <label class="form-check-label" for="radioAnoPassado">Ano
+                                                            Passado</label>
+                                                    </div>
+
+                                                    <hr class="my-2 border-light">
+
+                                                    <div class="form-check custom-option">
+                                                        <input class="form-check-input" type="radio"
+                                                            name="periodoOption" id="radioPersonalizado"
+                                                            value="personalizado" <%=periodo=='personalizado'
+                                                            ? 'checked' : '' %>>
+                                                        <label class="form-check-label fw-bold text-primary"
+                                                            for="radioPersonalizado">
+                                                            <i class='bx bx-edit-alt'></i> Personalizado
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div id="areaPersonalizada" class="row mt-3  p-3 rounded"
+                                                style="display: none;">
+                                                <div class="col-md-6 mb-3 mb-md-0">
+                                                    <label for="dataInicio" class="form-label fw-bold">Data
+                                                        Inicial</label>
+                                                    <input class="form-control" type="date" value="<%= dIni %>"
+                                                        id="dataInicio" />
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label for="dataFim" class="form-label fw-bold">Data Final</label>
+                                                    <input class="form-control" type="date" value="<%= dFim %>"
+                                                        id="dataFim" />
+                                                </div>
+                                            </div>
+
+                                        </div>
+
+                                        <div class="modal-footer d-flex flex-column flex-sm-row gap-2">
+
+                                            <button type="button"
+                                                class="btn btn-label-secondary w-100 w-sm-auto order-1 order-sm-0"
+                                                data-bs-dismiss="modal">
+                                                Cancelar
+                                            </button>
+
+                                            <button type="button"
+                                                class="btn btn-primary w-100 w-sm-auto order-0 order-sm-1"
+                                                id="btnSalvarFiltros">
+                                                Aplicar Filtros
+                                            </button>
+
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+
+                            <% if(locals.modo=='painel' ) { %>
+                                <div class="row">
+                                    <div class="col-12 col-md-6 mb-4">
+                                        <div class="card h-100 border-primary">
+                                            <div class="card-body">
+                                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                                    <div>
+                                                        <span class="fw-semibold d-block mb-1 text-muted">Faturamento
+                                                            Total</span>
+                                                        <h3 class="card-title mb-0 text-primary">
+                                                            R$ <%= dados.faturamento.toLocaleString('pt-BR',
+                                                                {minimumFractionDigits: 2, maximumFractionDigits: 2}) %>
+                                                        </h3>
+                                                    </div>
+                                                    <div class="avatar avatar-md">
+                                                        <span class="avatar-initial rounded bg-label-primary">
+                                                            <i class='bx bx-money fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-12 col-md-6 mb-4">
+                                        <div class="card h-100 border-success">
+                                            <div class="card-body">
+                                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                                    <div>
+                                                        <span class="fw-semibold d-block mb-1 text-muted">Lucro
+                                                            Bruto</span>
+                                                        <h3 class="card-title mb-0 text-success">
+                                                            R$ <%= dados.lucro_bruto.toLocaleString('pt-BR',
+                                                                {minimumFractionDigits: 2, maximumFractionDigits: 2}) %>
+                                                        </h3>
+                                                    </div>
+                                                    <div class="avatar avatar-md">
+                                                        <span class="avatar-initial rounded bg-label-success">
+                                                            <i class='bx bx-trending-up fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div class="progress" style="height: 4px;">
+                                                    <div class="progress-bar bg-success" role="progressbar"
+                                                        style="width: <%= dados.lucro_bruto_percent %>%"></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-6 col-md-3 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <div
+                                                    class="card-title d-flex align-items-start justify-content-between">
+                                                    <div class="avatar flex-shrink-0">
+                                                        <span class="avatar-initial rounded bg-label-info">
+                                                            <i class="bx bx-cart fs-4"></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span class="fw-semibold d-block mb-1">Qtde Vendas</span>
+                                                <h5 class="card-title mb-2">
+                                                    <%= dados.qtde_vendas %>
+                                                </h5>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-6 col-md-3 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <div
+                                                    class="card-title d-flex align-items-start justify-content-between">
+                                                    <div class="avatar flex-shrink-0">
+                                                        <span class="avatar-initial rounded bg-label-info">
+                                                            <i class='bx bx-receipt fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span class="fw-semibold d-block mb-1">Ticket Médio</span>
+                                                <h5 class="card-title mb-2">
+                                                    R$ <%= dados.ticket_medio.toLocaleString('pt-BR',
+                                                        {minimumFractionDigits: 2, maximumFractionDigits: 2}) %>
+                                                </h5>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-6 col-md-3 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <div
+                                                    class="card-title d-flex align-items-start justify-content-between">
+                                                    <div class="avatar flex-shrink-0">
+                                                        <span class="avatar-initial rounded bg-label-success">
+                                                            <i class='bx bx-pie-chart-alt-2 fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span class="fw-semibold d-block mb-1">Lucro</span>
+                                                <h5 class="card-title mb-2 text-success">
+                                                    <%= (dados.lucro_bruto_percent || 0).toLocaleString('pt-BR',
+                                                        {maximumFractionDigits: 2}) %>%
+                                                </h5>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-6 col-md-3 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <div
+                                                    class="card-title d-flex align-items-start justify-content-between">
+                                                    <div class="avatar flex-shrink-0">
+                                                        <span class="avatar-initial rounded bg-label-warning">
+                                                            <i class='bx bx-purchase-tag-alt fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span class="fw-semibold d-block mb-1">CMV</span>
+                                                <h5 class="card-title mb-2">
+                                                    R$ <%= dados.cmv.toLocaleString('pt-BR', {minimumFractionDigits: 2,
+                                                        maximumFractionDigits: 2}) %>
+                                                </h5>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-6 col-md-3 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <div
+                                                    class="card-title d-flex align-items-start justify-content-between">
+                                                    <div class="avatar flex-shrink-0">
+                                                        <span class="avatar-initial rounded bg-label-info">
+                                                            <i class='bx bx-line-chart fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span class="fw-semibold d-block mb-1">Markup</span>
+                                                <h5 class="card-title mb-2">
+                                                    <%= dados.markup.toLocaleString('pt-BR', {maximumFractionDigits: 2})
+                                                        %>%
+                                                </h5>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-6 col-md-3 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <div
+                                                    class="card-title d-flex align-items-start justify-content-between">
+                                                    <div class="avatar flex-shrink-0">
+                                                        <span class="avatar-initial rounded bg-label-secondary">
+                                                            <i class='bx bx-box fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span class="fw-semibold d-block mb-1">Itens/Venda</span>
+                                                <h5 class="card-title mb-2">
+                                                    <%= dados.itens_por_venda.toLocaleString('pt-BR',
+                                                        {maximumFractionDigits: 2}) %>
+                                                </h5>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-6 col-md-3 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <div
+                                                    class="card-title d-flex align-items-start justify-content-between">
+                                                    <div class="avatar flex-shrink-0">
+                                                        <span class="avatar-initial rounded bg-label-primary">
+                                                            <i class='bx bx-trophy fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span class="fw-semibold d-block mb-1">Maior Venda</span>
+                                                <h5 class="card-title mb-2">
+                                                    R$ <%= parseFloat(dados.maior_venda).toLocaleString('pt-BR',
+                                                        {minimumFractionDigits: 0}) %>
+                                                </h5>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="col-6 col-md-3 mb-4">
+                                        <div class="card h-100">
+                                            <div class="card-body">
+                                                <div
+                                                    class="card-title d-flex align-items-start justify-content-between">
+                                                    <div class="avatar flex-shrink-0">
+                                                        <span class="avatar-initial rounded bg-label-secondary">
+                                                            <i class='bx bx-down-arrow-circle fs-4'></i>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <span class="fw-semibold d-block mb-1">Menor Venda</span>
+                                                <h5 class="card-title mb-2">
+                                                    R$ <%= parseFloat(dados.menor_venda).toLocaleString('pt-BR',
+                                                        {minimumFractionDigits: 0}) %>
+                                                </h5>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <% } else { %>
+                                    <div class="row g-4">
+
+                                        <% if (dados.length> 0) { %>
+                                            <div class="col-12">
+                                                <div class="card">
+                                                    <div class="card-header header-elements">
+                                                        <h5 class="card-title mb-0">Visualização Gráfica</h5>
+                                                    </div>
+                                                    <div class="card-body">
+                                                        <div style="position: relative; height: 350px; width: 100%;">
+                                                            <canvas id="graficoRelatorio"></canvas>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <% } %>
+
+                                                <div class="col-12">
+                                                    <div class="card">
+                                                        <div class="card-header">
+                                                            <h5 class="card-title mb-0">Detalhamento</h5>
+                                                        </div>
+                                                        <div class="table-responsive text-nowrap">
+                                                            <table class="table table-hover align-middle mb-0">
+                                                                <thead class="bg-light text-secondary">
+                                                                    <tr>
+                                                                        <th class="ps-4 py-3" style="min-width: 200px;">
+                                                                            Descrição</th>
+                                                                        <th class="text-end py-3">Valor (R$)</th>
+                                                                        <th class="text-end pe-4 py-3">Qtde</th>
+                                                                    </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                    <% if (!dados || !Array.isArray(dados) ||
+                                                                        dados.length===0) { %>
+                                                                        <tr>
+                                                                            <td colspan="3"
+                                                                                class="text-center py-5 text-muted">
+                                                                                <div
+                                                                                    class="d-flex flex-column align-items-center justify-content-center">
+                                                                                    <i class='bx bx-data fs-1 mb-2'></i>
+                                                                                    <span>Nenhum dado encontrado neste
+                                                                                        período.</span>
+                                                                                </div>
+                                                                            </td>
+                                                                        </tr>
+                                                                        <% } else { let maxVal=Math.max(...dados.map(d=>
+                                                                            d.total || 0));
+                                                                            %>
+                                                                            <% dados.forEach(function(item) { %>
+                                                                                <tr>
+                                                                                    <td class="ps-4 py-3">
+                                                                                        <div class="d-flex flex-column">
+                                                                                            <span
+                                                                                                class="fw-bold text-dark text-truncate"
+                                                                                                style="max-width: 250px;">
+                                                                                                <%= item.nome %>
+                                                                                            </span>
+                                                                                            <div class="progress mt-1"
+                                                                                                style="height: 6px; width: 100px;">
+                                                                                                <div class="progress-bar bg-primary"
+                                                                                                    role="progressbar"
+                                                                                                    style="width: <%= maxVal > 0 ? (item.total / maxVal * 100) : 0 %>%">
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    </td>
+                                                                                    <td
+                                                                                        class="text-end fw-bold text-primary">
+                                                                                        <%= parseFloat(item.total).toLocaleString('pt-BR',
+                                                                                            {minimumFractionDigits: 2})
+                                                                                            %>
+                                                                                    </td>
+                                                                                    <td
+                                                                                        class="text-end pe-4 text-muted">
+                                                                                        <%= item.qtd %>
+                                                                                    </td>
+                                                                                </tr>
+                                                                                <% }); %>
+                                                                                    <% } %>
+                                                                </tbody>
+                                                            </table>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                    </div>
+                                    <% } %>
+
                         </div>
-                        <div class="mb-4">
-                            <label class="form-label fw-bold text-muted">Data Final</label>
-                            <input type="date" name="data_fim" class="form-control form-control-lg" required value="<%= dFim %>">
-                        </div>
-                        <button type="submit" class="btn btn-primary w-100 btn-lg shadow-sm">
-                            <i class="fas fa-filter me-2"></i> Filtrar
-                        </button>
-                    </form>
+                        <footer class="content-footer footer bg-footer-theme">
+                            <div class="container-xxl">
+                                <div
+                                    class="footer-container d-flex align-items-center justify-content-center py-4 flex-md-row flex-column">
+                                    <div class="mb-2 mb-md-0">
+                                        &#169;
+                                        <script>document.write(new Date().getFullYear());</script>,
+                                        <a href="https://www.bminformatica.com.br/" target="_blank"
+                                            class="footer-link">BM
+                                            Informática Ltda</a>
+                                    </div>
+                                </div>
+                            </div>
+                        </footer>
+                        <div class="content-backdrop fade"></div>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <div class="offcanvas offcanvas-start" tabindex="-1" id="menuLateral">
-        <div class="offcanvas-header bg-primary text-white">
-            <h5 class="offcanvas-title fw-bold">Menu</h5>
-            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
-        </div>
-        <div class="offcanvas-body p-0">
-            <% const qParams = `loja_id=${lojaId}&periodo=${periodo}&data_inicio=${dIni}&data_fim=${dFim}`; %>
-            <div class="py-2">
-                <a href="/painel?<%= qParams %>" class="menu-item"><i class="fas fa-chart-line me-2"></i> Monitor de Faturamento</a>
-                <a href="/relatorios/produto?<%= qParams %>" class="menu-item"><i class="fas fa-box me-2"></i> Produtos mais Vendidos</a>
-                <a href="/relatorios/hora?<%= qParams %>" class="menu-item"><i class="fas fa-clock me-2"></i> Vendas por Hora</a>
-                <a href="/relatorios/dia?<%= qParams %>" class="menu-item"><i class="fas fa-calendar-alt me-2"></i> Vendas por Dia</a>
-                <a href="/relatorios/pagamento?<%= qParams %>" class="menu-item"><i class="fas fa-credit-card me-2"></i> Vendas por Pagamento</a>
-                <a href="/relatorios/secao?<%= qParams %>" class="menu-item"><i class="fas fa-tags me-2"></i> Vendas por Seção</a>
-                <a href="/relatorios/grupo?<%= qParams %>" class="menu-item"><i class="fas fa-layer-group me-2"></i> Vendas por Grupo</a>
-                <a href="/relatorios/fabricante?<%= qParams %>" class="menu-item"><i class="fas fa-industry me-2"></i> Vendas por Fabricante</a>
-                <a href="/relatorios/fornecedor?<%= qParams %>" class="menu-item"><i class="fas fa-truck me-2"></i> Vendas por Fornecedor</a>
-                <a href="/relatorios/cliente?<%= qParams %>" class="menu-item"><i class="fas fa-users me-2"></i> Principais Clientes</a>
-                <a href="/relatorios/terminal?<%= qParams %>" class="menu-item"><i class="fas fa-desktop me-2"></i> Vendas por Terminal</a>
-                <a href="/relatorios/usuario?<%= qParams %>" class="menu-item"><i class="fas fa-user-tag me-2"></i> Vendas por Usuário</a>
-                <a href="/relatorios/vendedor?<%= qParams %>" class="menu-item"><i class="fas fa-user-tie me-2"></i> Vendas por Vendedor</a>
-            </div>
-            <div style="border-top: 5px solid #f0f2f5;"></div>
-            <div class="py-2">
-                <a href="/logout" class="menu-item text-danger"><i class="fas fa-sign-out-alt me-2"></i> Sair do Sistema</a>
-            </div>
-        </div>
-    </div>
+        <script src="/assets/vendor/libs/jquery/jquery.js"></script>
+        <script src="/assets/vendor/js/bootstrap.js"></script>
+        <script src="/assets/vendor/libs/perfect-scrollbar/perfect-scrollbar.js"></script>
+        <script src="/assets/vendor/js/menu.js"></script>
+        <script src="/assets/js/main.js"></script>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+        <script>
+            $(document).ready(function () {
+                function toggleAreaPersonalizada() {
+                    var periodoSelecionado = $('input[name="periodoOption"]:checked').val();
 
-    <% if (dados.length > 0) { %>
-    <script>
-        const ctx = document.getElementById('graficoRelatorio').getContext('2d');
-        const tipoRelatorio = "<%= tipo %>";
-        const dadosRaw = <%- JSON.stringify(dados) %>;
-        const dadosGrafico = dadosRaw.slice(0, 10);
-        const labels = dadosGrafico.map(item => item.nome);
-        const valores = dadosGrafico.map(item => item.total);
-        let tipoChart = 'bar';
-        let usarEixoY = true;
-
-        if (['pagamento', 'secao', 'grupo', 'fabricante', 'familia', 'fornecedor'].includes(tipoRelatorio)) {
-            tipoChart = 'doughnut';
-            usarEixoY = false;
-        }
-
-        const backgroundColors = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69', '#f8f9fc', '#2e59d9', '#17a673'];
-
-        new Chart(ctx, {
-            type: tipoChart,
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Faturamento (R$)',
-                    data: valores,
-                    backgroundColor: backgroundColors,
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: !usarEixoY, position: 'bottom' },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                let label = context.label || '';
-                                if (label) { label += ': '; }
-                                let val = context.parsed.y !== undefined ? context.parsed.y : context.raw;
-                                label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-                                return label;
-                            }
-                        }
+                    if (periodoSelecionado === 'personalizado') {
+                        $('#areaPersonalizada').slideDown(200);
+                    } else {
+                        $('#areaPersonalizada').slideUp(200);
                     }
-                },
-                scales: usarEixoY ? {
-                    y: { beginAtZero: true, ticks: { callback: function(value) { return 'R$ ' + value.toLocaleString('pt-BR'); } } }
-                } : { x: { display: false }, y: { display: false } }
-            }
-        });
-    </script>
-    <% } %>
+                }
 
-</body>
-</html>
+                toggleAreaPersonalizada();
+                $('input[name="periodoOption"]').change(function () {
+                    toggleAreaPersonalizada();
+                });
+
+                $('#btnSalvarFiltros').click(function () {
+                    var lojaId = $('#selectLojaInput').val();
+                    var periodo = $('input[name="periodoOption"]:checked').val();
+
+                    if (!periodo) {
+                        alert("Selecione um período");
+                        return;
+                    }
+
+                    var url = window.location.pathname + '?loja_id=' + lojaId + '&periodo=' + periodo;
+
+                    if (periodo === 'personalizado') {
+                        var dIni = $('#dataInicio').val();
+                        var dFim = $('#dataFim').val();
+
+                        if (!dIni || !dFim) {
+                            alert("Por favor, preencha as datas inicial e final.");
+                            return;
+                        }
+
+                        url += '&data_inicio=' + dIni + '&data_fim=' + dFim;
+                        // var hIni = $('#horaInicio').val();
+                        // var hFim = $('#horaFim').val();
+                        // url += '&hora_inicio=' + hIni + '&hora_fim=' + hFim;
+                    }
+
+                    window.location.href = url;
+                });
+            });
+        </script>
+
+        <% if (dados.length> 0 && locals.modo != 'painel') { %>
+            <script>
+                const ctx = document.getElementById('graficoRelatorio').getContext('2d');
+                const tipoRelatorio = "<%= tipo %>";
+                const dadosRaw = <%- JSON.stringify(dados) %>;
+                const dadosGrafico = dadosRaw.slice(0, 10);
+                const labels = dadosGrafico.map(item => item.nome);
+                const valores = dadosGrafico.map(item => item.total);
+                let tipoChart = 'bar';
+                let usarEixoY = true;
+
+                console.log(dadosRaw);
+
+                if (['pagamento', 'secao', 'grupo', 'fabricante', 'familia', 'fornecedor'].includes(tipoRelatorio)) {
+                    tipoChart = 'doughnut';
+                    usarEixoY = false;
+                }
+
+                const backgroundColors = ['#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', '#858796', '#5a5c69', '#f8f9fc', '#2e59d9', '#17a673'];
+
+                new Chart(ctx, {
+                    type: tipoChart,
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Faturamento (R$)',
+                            data: valores,
+                            backgroundColor: backgroundColors,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: !usarEixoY, position: 'bottom' },
+                            tooltip: {
+                                callbacks: {
+                                    label: function (context) {
+                                        let label = context.label || '';
+                                        if (label) { label += ': '; }
+                                        let val = context.parsed.y !== undefined ? context.parsed.y : context.raw;
+                                        label += new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: usarEixoY ? {
+                            y: { beginAtZero: true, ticks: { callback: function (value) { return 'R$ ' + value.toLocaleString('pt-BR'); } } }
+                        } : { x: { display: false }, y: { display: false } }
+                    }
+                });
+            </script>
+            <% } %>
+
+    </body>
+
+    </html>
