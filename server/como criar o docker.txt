@@ -6,3 +6,8 @@ docker tag dashboard-api ghcr.io/edbminfo/dashboard-api:latest
 
 
 docker push ghcr.io/edbminfo/dashboard-api:latest
+
+-----
+docker build -t dashboard-front .
+docker tag dashboard-front ghcr.io/edbminfo/dashboard-front:v2
+docker push ghcr.io/edbminfo/dashboard-front:v2

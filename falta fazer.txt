@@ -1,7 +1,0 @@
-falta fazer com que o cliente ignore as vendas que está com normal = N e gerar o eecultavel exe
-Checar os relatórios
-
-
-
-
-id_vendedor não está indo no produto
