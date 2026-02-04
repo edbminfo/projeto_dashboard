@@ -13,7 +13,7 @@ DELAY_ENTRE_LOTES = 1   # Segundos entre envios para não sobrecarregar
 TIMEOUT_API = 60        # Timeout da requisição
 
 # --- VERSÃO ---
-VERSAO = "48.0 (Suporte a Tabelas sem coluna ID)"
+VERSAO = "49.0 (Filtros removidos - Tratamento no Backend)"
 
 print(f">> Iniciando Agente Sync v{VERSAO}...", flush=True)
 
@@ -66,11 +66,8 @@ TABELAS_SYNC = [
     {"nome": "FORMAPAG", "endpoint": "/api/sync/cadastros/formapag", "sql": "ID, FORMAPAG AS NOME, TIPO"},
     {"nome": "PRODUTO", "endpoint": "/api/sync/cadastros/produto", "sql": "ID, NOME, PRECO_VENDA, CUSTO_TOTAL, ID_GRUPO, ID_FABRICANTE, ID_FORNECEDOR, ID_FAMILIA, ATIVO"},
     
-    # MOVIMENTAÇÃO
-    # Tabela SAIDA costuma ter ID. 
-    {"nome": "SAIDA", "endpoint": "/api/sync/saida", "sql": "ID, ID_FILIAL, DATA, HORA, TOTAL, ID_CLIENTE, TERMINAL, USUARIO AS ID_USUARIO, ELIMINADO, NUMERO, SERIE, TIPOSAIDA, TIPO, CHAVENFE"},
-    
-    # SAIDA_PRODUTO e SAIDA_FORMAPAG removidos o campo ID (usaremos a DB_KEY como identificador)
+    # MOVIMENTAÇÃO (Campos ELIMINADO e NORMAL mantidos para filtro no Backend)
+    {"nome": "SAIDA", "endpoint": "/api/sync/saida", "sql": "ID, ID_FILIAL, DATA, HORA, TOTAL, ID_CLIENTE, TERMINAL, USUARIO AS ID_USUARIO, ELIMINADO, NORMAL, NUMERO, SERIE, TIPOSAIDA, TIPO, CHAVENFE"},
     {"nome": "SAIDA_PRODUTO", "endpoint": "/api/sync/saida_produto", "sql": "ID_SAIDA, ID_PRODUTO, ID_VENDEDOR, QUANT, TOTAL"},
     {"nome": "SAIDA_FORMAPAG", "endpoint": "/api/sync/saida_formapag", "sql": "ID_SAIDA, ID_FORMAPAG, VALOR"},
 ]
@@ -78,60 +75,35 @@ TABELAS_SYNC = [
 def limpar_valor(val):
     if val is None: return None
     if isinstance(val, bytes):
-        try: 
-            # Tenta decodificar, se falhar retorna a representação hexadecimal (útil para DB_KEY)
-            return val.hex()
-        except: 
-            return str(val)
-    
+        try: return val.hex()
+        except: return str(val)
     if isinstance(val, str): return val.replace('\x00', '').strip()
     if isinstance(val, decimal.Decimal): return float(val)
     if isinstance(val, (datetime, date, dt_time)): return val.isoformat()
-    if hasattr(val, 'isoformat'): return val.isoformat()
-    
     return val
 
 def row_to_dict(row, col_names, db_key):
     data = {}
-    
-    # LISTA DE CAMPOS QUE PRECISAM SER NUMÉRICOS (PONTO DECIMAL)
-    # Adicionamos aqui todos os campos de valor, custo, quantidade e comissão
-    campos_numericos = [
-        'total', 'quant', 'valor', 'preco_venda', 
-        'custo_total', 'comissao'
-    ]
-
-    # LISTA DE CAMPOS QUE DEVEM SER STRING (TEXTO)
-    campos_string = [
-        'id', 'id_filial', 'id_cliente', 'id_usuario', 'id_saida', 'id_produto', 
-        'id_formapag', 'terminal', 'numero', 'serie', 'chavenfe', 'id_vendedor'
-    ]
+    campos_numericos = ['total', 'quant', 'valor', 'preco_venda', 'custo_total', 'comissao']
+    campos_string = ['id', 'id_filial', 'id_cliente', 'id_usuario', 'id_saida', 'id_produto', 'id_formapag', 'terminal', 'numero', 'serie', 'chavenfe', 'id_vendedor']
 
     for i, col in enumerate(col_names):
         key = col.lower().strip()
         val = limpar_valor(row[i])
         
-        # --- CORREÇÃO DEFINITIVA (VÍRGULA -> PONTO) ---
         if key in campos_numericos:
-            if isinstance(val, str):
-                val = val.replace(',', '.')
-            # Se vier como Decimal ou Float do banco, garantimos que vira string com ponto
-            if val is not None:
-                val = str(val) 
-        # ----------------------------------------------
+            if isinstance(val, str): val = val.replace(',', '.')
+            if val is not None: val = str(val) 
         
-        # Garante que IDs sejam strings (sem notação científica ou arredondamentos)
         if key in campos_string and val is not None:
             val = str(val)
             
         data[key] = val
     
-    # Lógica de Identificador Original
     if 'id' in data:
         data['id_original'] = data['id']
         del data['id']
     else:
-        # Se a tabela não tem ID, usamos a DB_KEY
         data['id_original'] = limpar_valor(db_key)
         
     return data
@@ -155,7 +127,6 @@ def enviar_lote(endpoint, payload, tabela_origem, db_keys):
         print(f"\n   [ERRO ENVIO]: {e}")
     return False
 
-# --- SINCRONISMO DE DADOS ATIVOS ---
 def executar_ciclo_sync():
     encontrou_dados = False
     hora_atual = datetime.now().strftime("%H:%M:%S")
@@ -169,16 +140,15 @@ def executar_ciclo_sync():
         try:
             sql = f"SELECT FIRST {TAMANHO_LOTE} RDB$DB_KEY, {config_tbl['sql']}, SYNK_DASH_PEND FROM {tabela} WHERE SYNK_DASH_PEND = 'S'"
             
+            # Filtro simplificado apenas por DATA_CORTE
             if tabela == "SAIDA":
-                sql += f" AND DATA >= '{DATA_CORTE}' AND (ELIMINADO IS NULL OR ELIMINADO = 'N') AND (NORMAL IS NULL OR NORMAL <> 'N')"
+                sql += f" AND DATA >= '{DATA_CORTE}'"
             
             elif tabela in ["SAIDA_PRODUTO", "SAIDA_FORMAPAG"]:
                 sql += f""" AND EXISTS (
                     SELECT 1 FROM SAIDA 
                     WHERE SAIDA.ID = {tabela}.ID_SAIDA 
-                    AND SAIDA.DATA >= '{DATA_CORTE}' 
-                    AND (SAIDA.ELIMINADO IS NULL OR SAIDA.ELIMINADO = 'N')
-                    AND (SAIDA.NORMAL IS NULL OR SAIDA.NORMAL <> 'N')
+                    AND SAIDA.DATA >= '{DATA_CORTE}'
                 )"""
 
             cursor.execute(sql)
@@ -188,7 +158,6 @@ def executar_ciclo_sync():
 
             if rows:
                 encontrou_dados = True
-                # r[0] é sempre a RDB$DB_KEY selecionada manualmente no SQL acima
                 payload = [row_to_dict(r[1:-1], col_names, r[0]) for r in rows]
                 db_keys = [r[0] for r in rows]
 
@@ -203,45 +172,6 @@ def executar_ciclo_sync():
             print(f"Erro ao ler {tabela}: {e}")
     return encontrou_dados
 
-# --- SINCRONISMO DE DELEÇÃO (RODA POR ÚLTIMO) ---
-def verificar_delecoes():
-    conn = get_connection()
-    if not conn: return False
-    cursor = conn.cursor()
-    
-    try:
-        sql = f"SELECT FIRST {TAMANHO_LOTE} RDB$DB_KEY, ID FROM SAIDA WHERE ELIMINADO = 'S' AND SYNK_DASH_PEND = 'S' AND DATA >= '{DATA_CORTE}' AND (NORMAL IS NULL OR NORMAL <> 'N')"
-        cursor.execute(sql)
-        rows = cursor.fetchall()
-        conn.close()
-
-        if rows:
-            for r in rows:
-                db_key, id_original = r[0], str(r[1])
-                print(f">> [LIMPEZA NUVEM] Deletando venda cancelada {id_original}...", end=" ", flush=True)
-                
-                res = requests.post(
-                    f"{API_URL}/api/sync/deletar-venda", 
-                    json={"id_original": id_original},
-                    headers={"Authorization": f"Bearer {TOKEN}"},
-                    timeout=TIMEOUT_API
-                )
-
-                if res.status_code in [200, 404]:
-                    c2 = get_connection(); cur2 = c2.cursor()
-                    cur2.execute("UPDATE SAIDA SET SYNK_DASH_PEND = 'N' WHERE RDB$DB_KEY = ?", (db_key,))
-                    cur2.execute("UPDATE SAIDA_PRODUTO SET SYNK_DASH_PEND = 'N' WHERE ID_SAIDA = ?", (id_original,))
-                    cur2.execute("UPDATE SAIDA_FORMAPAG SET SYNK_DASH_PEND = 'N' WHERE ID_SAIDA = ?", (id_original,))
-                    c2.commit(); c2.close()
-                    print("✅")
-                else:
-                    print(f"❌ (Erro {res.status_code})")
-            return True
-    except Exception as e:
-        print(f"Erro no ciclo de deleção: {e}")
-    return False
-
-# --- CONFIGURAÇÃO INICIAL E MANUTENÇÃO ---
 def configurar_estrutura_banco():
     print(f"\n--- Agente Sync Dashboard v{VERSAO} ---")
     conn = get_connection()
@@ -269,8 +199,8 @@ def configurar_estrutura_banco():
             except: pass
 
     print(f">> Manutenção de integridade (Data Corte: {DATA_CORTE})")
+    # Agora limpa apenas o que for anterior à data de corte
     cursor.execute(f"UPDATE SAIDA SET SYNK_DASH_PEND = 'N' WHERE DATA < '{DATA_CORTE}' AND SYNK_DASH_PEND = 'S'")
-    cursor.execute(f"UPDATE SAIDA SET SYNK_DASH_PEND = 'N' WHERE NORMAL = 'N' AND SYNK_DASH_PEND = 'S'")
     
     sql_limpeza = f"""
         UPDATE {{tabela}} SET SYNK_DASH_PEND = 'N' 
@@ -278,9 +208,7 @@ def configurar_estrutura_banco():
         AND NOT EXISTS (
             SELECT 1 FROM SAIDA 
             WHERE SAIDA.ID = {{tabela}}.ID_SAIDA 
-            AND SAIDA.DATA >= '{DATA_CORTE}' 
-            AND (SAIDA.ELIMINADO IS NULL OR SAIDA.ELIMINADO = 'N')
-            AND (SAIDA.NORMAL IS NULL OR SAIDA.NORMAL <> 'N')
+            AND SAIDA.DATA >= '{DATA_CORTE}'
         )
     """
     cursor.execute(sql_limpeza.format(tabela="SAIDA_PRODUTO"))
@@ -298,11 +226,8 @@ if __name__ == "__main__":
 
     while True:
         try:
-            fez_algo = False
-            if executar_ciclo_sync(): fez_algo = True
-            if verificar_delecoes(): fez_algo = True
-
-            if not fez_algo:
+            # Função verificar_delecoes removida; agora o Backend cuida disso
+            if not executar_ciclo_sync():
                 sys.stdout.write(".")
                 sys.stdout.flush()
                 time.sleep(DELAY_OCIOSO)
