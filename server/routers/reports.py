@@ -104,7 +104,12 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
     if not verificar_tabela(cursor, schema, 'saida', 'total'): conn.close(); return []
 
     sql = ""
-    where_saida = f"WHERE s.\"data\"::date BETWEEN %s AND %s AND (s.eliminado IS NULL OR s.eliminado = 'N') AND (s.normal IS NULL OR s.normal <> 'N')"
+    # Filtro Unificado para todos os Rankings
+    where_saida = f"""
+        WHERE s."data"::date BETWEEN %s AND %s 
+        AND (s.eliminado IS NULL OR s.eliminado = 'N') 
+        AND (s.normal IS NULL OR s.normal = 'S')
+    """
     
     try:
         if tipo == "produto":
@@ -117,7 +122,6 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
                     {where_saida} GROUP BY 1 ORDER BY 2 DESC LIMIT {limit}
                 """
         elif tipo == "hora":
-            # CORREÇÃO: Expressão de extração incluída no GROUP BY para evitar erro de sintaxe
             sql = f"""
                 SELECT 
                     EXTRACT(HOUR FROM (s."data"::date + s."hora"::time))::text || 'h', 
@@ -125,9 +129,10 @@ def get_ranking(tipo: str, data_inicio: date, data_fim: date, limit: int = 20, s
                     COUNT(*) 
                 FROM {schema}.saida s 
                 {where_saida} 
-                GROUP BY EXTRACT(HOUR FROM (s."data"::date + s."hora"::time))
-                ORDER BY EXTRACT(HOUR FROM (s."data"::date + s."hora"::time)) ASC
+                GROUP BY 1
+                ORDER BY 1 ASC
             """
+        # ... (os demais tipos como 'dia', 'pagamento' e 'vendedor' já utilizam {where_saida} corretamente)
         elif tipo == "dia":
             sql = f"""SELECT TO_CHAR(s."data", 'DD/MM/YYYY'), SUM(NULLIF(s.total, '')::numeric), COUNT(*) FROM {schema}.saida s {where_saida} GROUP BY s."data"::date, 1 ORDER BY s."data"::date ASC"""
         elif tipo == "pagamento":

@@ -8,12 +8,12 @@ import decimal
 from datetime import datetime, date, time as dt_time
 
 # --- CONFIGURAÇÕES DE PERFORMANCE ---
-DELAY_OCIOSO = 30       # Segundos quando não há nada para enviar
-DELAY_ENTRE_LOTES = 1   # Segundos entre envios para não sobrecarregar
+DELAY_OCIOSO = 60       # Segundos quando não há nada para enviar
+DELAY_ENTRE_LOTES = 2   # Segundos entre envios para não sobrecarregar
 TIMEOUT_API = 60        # Timeout da requisição
 
 # --- VERSÃO ---
-VERSAO = "49.0 (Filtros removidos - Tratamento no Backend)"
+VERSAO = "CLIENTE DASHBOARD"
 
 print(f">> Iniciando Agente Sync v{VERSAO}...", flush=True)
 
@@ -28,7 +28,7 @@ try:
     TAMANHO_LOTE = config.getint('CONFIG', 'tamanho_lote', fallback=50)
     TOKEN = config.get('API', 'token_loja', fallback=None)
     
-    # Data de Corte (Padrão 2026-01-01)
+    # Data de Corte
     DATA_CORTE = config.get('CONFIG', 'data_corte', fallback="2026-01-01")
     
     # Configurações de Banco
@@ -66,9 +66,13 @@ TABELAS_SYNC = [
     {"nome": "FORMAPAG", "endpoint": "/api/sync/cadastros/formapag", "sql": "ID, FORMAPAG AS NOME, TIPO"},
     {"nome": "PRODUTO", "endpoint": "/api/sync/cadastros/produto", "sql": "ID, NOME, PRECO_VENDA, CUSTO_TOTAL, ID_GRUPO, ID_FABRICANTE, ID_FORNECEDOR, ID_FAMILIA, ATIVO"},
     
-    # MOVIMENTAÇÃO (Campos ELIMINADO e NORMAL mantidos para filtro no Backend)
+    # SAIDA: Incluído NORMAL e ELIMINADO para tratamento no Back
     {"nome": "SAIDA", "endpoint": "/api/sync/saida", "sql": "ID, ID_FILIAL, DATA, HORA, TOTAL, ID_CLIENTE, TERMINAL, USUARIO AS ID_USUARIO, ELIMINADO, NORMAL, NUMERO, SERIE, TIPOSAIDA, TIPO, CHAVENFE"},
-    {"nome": "SAIDA_PRODUTO", "endpoint": "/api/sync/saida_produto", "sql": "ID_SAIDA, ID_PRODUTO, ID_VENDEDOR, QUANT, TOTAL"},
+    
+    # SAIDA_PRODUTO: ADICIONADO CAMPO ID
+    {"nome": "SAIDA_PRODUTO", "endpoint": "/api/sync/saida_produto", "sql": "ID, ID_SAIDA, ID_PRODUTO, ID_VENDEDOR, QUANT, TOTAL"},
+    
+    # SAIDA_FORMAPAG: Segue sem ID (usa DB_KEY conforme estrutura do Firebird)
     {"nome": "SAIDA_FORMAPAG", "endpoint": "/api/sync/saida_formapag", "sql": "ID_SAIDA, ID_FORMAPAG, VALOR"},
 ]
 
@@ -100,10 +104,12 @@ def row_to_dict(row, col_names, db_key):
             
         data[key] = val
     
+    # Se houver 'id' na consulta SQL, ele vira 'id_original' na nuvem
     if 'id' in data:
         data['id_original'] = data['id']
         del data['id']
     else:
+        # Fallback para DB_KEY caso a tabela não tenha ID (ex: SAIDA_FORMAPAG)
         data['id_original'] = limpar_valor(db_key)
         
     return data
@@ -140,7 +146,7 @@ def executar_ciclo_sync():
         try:
             sql = f"SELECT FIRST {TAMANHO_LOTE} RDB$DB_KEY, {config_tbl['sql']}, SYNK_DASH_PEND FROM {tabela} WHERE SYNK_DASH_PEND = 'S'"
             
-            # Filtro simplificado apenas por DATA_CORTE
+            # Filtro apenas por DATA_CORTE (Removido filtros de ELIMINADO/NORMAL)
             if tabela == "SAIDA":
                 sql += f" AND DATA >= '{DATA_CORTE}'"
             
@@ -199,7 +205,7 @@ def configurar_estrutura_banco():
             except: pass
 
     print(f">> Manutenção de integridade (Data Corte: {DATA_CORTE})")
-    # Agora limpa apenas o que for anterior à data de corte
+    # Limpa apenas registros anteriores à data de corte
     cursor.execute(f"UPDATE SAIDA SET SYNK_DASH_PEND = 'N' WHERE DATA < '{DATA_CORTE}' AND SYNK_DASH_PEND = 'S'")
     
     sql_limpeza = f"""
@@ -226,7 +232,6 @@ if __name__ == "__main__":
 
     while True:
         try:
-            # Função verificar_delecoes removida; agora o Backend cuida disso
             if not executar_ciclo_sync():
                 sys.stdout.write(".")
                 sys.stdout.flush()

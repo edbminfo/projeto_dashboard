@@ -1,105 +1,99 @@
 import customtkinter as ctk
 import threading
-import time
+import os
 import sys
+import time
 from datetime import datetime
-# Importamos as funções do seu script original
-from agente_sync import executar_ciclo_sync, verificar_delecoes, configurar_estrutura_banco, VERSAO, DATA_CORTE, TOKEN
+from PIL import Image
+import pystray
+from pystray import MenuItem as item
+import agente_sync
 
-class AgenteSyncGUI(ctk.CTk):
+def resource_path(relative_path):
+    try: base_path = sys._MEIPASS
+    except Exception: base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+class App(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title(f"Agente Sync Dashboard - v{VERSAO}")
-        self.geometry("600x700")
-        self.is_running = False
+        # 1. Tenta carregar configurações
+        sucesso, msg = agente_sync.carregar_configuracoes()
+        self.cnpj = agente_sync.TOKEN if agente_sync.TOKEN else "DESCONHECIDO"
 
-        # --- Layout da Interface (Baseado na sua foto) ---
-        self.setup_ui()
+        # 2. Bloqueio de Instância Única por CNPJ
+        if self.verificar_lock():
+            sys.exit(0)
 
-        # --- Inicialização Automática ---
-        self.adicionar_log(f"Configuração detectada. Iniciando automaticamente...")
-        self.iniciar_sincronismo()
+        # 3. Configuração Visual (Dark Theme)
+        ctk.set_appearance_mode("dark")
+        self.title("BM Dashboard - Agente")
+        self.geometry("700x520")
+        self.protocol('WM_DELETE_WINDOW', self.minimizar_para_tray)
 
-    def setup_ui(self):
-        # Frame Identificação
-        self.frame_api = ctk.CTkFrame(self)
-        self.frame_api.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(self.frame_api, text="Identificação (API)", font=("Arial", 12, "bold")).pack(anchor="w", padx=10)
-        self.criar_campo(self.frame_api, "CNPJ:", "11222333000198")
-        self.criar_campo(self.frame_api, "Token:", "********************", show="*")
+        # Cabeçalho
+        ctk.CTkLabel(self, text=f"Agente Sync v{agente_sync.VERSAO}", font=("Arial", 20, "bold")).pack(pady=(15, 0))
+        self.lbl_cnpj = ctk.CTkLabel(self, text=f"LOJA ATIVA: {self.cnpj}", font=("Arial", 14, "bold"), text_color="#3b8ed0")
+        self.lbl_cnpj.pack(pady=(0, 15))
 
-        # Frame Banco de Dados
-        self.frame_db = ctk.CTkFrame(self)
-        self.frame_db.pack(fill="x", padx=20, pady=10)
-        ctk.CTkLabel(self.frame_db, text="Configuração Firebird / DB", font=("Arial", 12, "bold")).pack(anchor="w", padx=10)
-        self.criar_campo(self.frame_db, "Tipo:", "FIREBIRD")
-        self.criar_campo(self.frame_db, "Host/IP:", "localhost")
-        self.criar_campo(self.frame_db, "Caminho DB:", r"C:\datacash\DADOS\BM.FDB")
+        # Terminal de Log
+        self.log_text = ctk.CTkTextbox(self, width=660, height=300, fg_color="black", text_color="#2ecc71", font=("Consolas", 12))
+        self.log_text.pack(padx=20, pady=10, fill="both", expand=True)
 
-        # Botões
-        self.frame_btn = ctk.CTkFrame(self, fg_color="transparent")
-        self.frame_btn.pack(fill="x", padx=20, pady=10)
-        
-        self.btn_acao = ctk.CTkButton(self.frame_btn, text="PARAR", fg_color="#d35400", command=self.toggle_sync)
-        self.btn_acao.pack(side="left", expand=True, padx=5)
-        
-        ctk.CTkButton(self.frame_btn, text="Ocultar", command=self.withdraw).pack(side="left", expand=True, padx=5)
+        # Botão Status
+        self.btn_status = ctk.CTkButton(self, text="AGENTE ATIVO", fg_color="green", state="disabled", width=200)
+        self.btn_status.pack(pady=20)
 
-        # Terminal de Log (Preto com letras verdes como na foto)
-        self.txt_log = ctk.CTkTextbox(self, height=250, fg_color="black", text_color="#2ecc71", font=("Consolas", 12))
-        self.txt_log.pack(fill="both", expand=True, padx=20, pady=10)
+        # Setup do Tray
+        self.setup_tray()
 
-    def criar_campo(self, master, label, valor, show=None):
-        f = ctk.CTkFrame(master, fg_color="transparent")
-        f.pack(fill="x", padx=10, pady=2)
-        ctk.CTkLabel(f, text=label, width=100, anchor="w").pack(side="left")
-        e = ctk.CTkEntry(f, show=show)
-        e.insert(0, valor)
-        e.pack(side="left", fill="x", expand=True)
-
-    def adicionar_log(self, mensagem):
-        timestamp = datetime.now().strftime("[%H:%M:%S]")
-        self.txt_log.insert("end", f"{timestamp} {mensagem}\n")
-        self.txt_log.see("end")
-
-    def iniciar_sincronismo(self):
-        if not self.is_running:
-            self.is_running = True
-            self.btn_acao.configure(text="PARAR", fg_color="#d35400")
-            # Executa a manutenção inicial e o loop em Background
-            threading.Thread(target=self.trabalho_sync, daemon=True).start()
-
-    def toggle_sync(self):
-        if self.is_running:
-            self.is_running = False
-            self.btn_acao.configure(text="INICIAR", fg_color="#27ae60")
-            self.adicionar_log("Serviço de sincronização PARADO.")
+        # Início Automático
+        if sucesso:
+            self.adicionar_log(f"Configurações carregadas para o CNPJ: {self.cnpj}")
+            threading.Thread(target=self.rodar_sync, daemon=True).start()
+            self.after(3000, self.minimizar_para_tray)
         else:
-            self.iniciar_sincronismo()
-            self.adicionar_log("Serviço de sincronização REINICIADO.")
+            self.adicionar_log(f"ERRO DE CONFIGURAÇÃO: {msg}", erro=True)
 
-    def trabalho_sync(self):
-        """Este método substitui o 'while True' do seu agente_sync.py original"""
-        configurar_estrutura_banco() #
-        self.adicionar_log("Serviço de sincronização INICIADO.")
+    def verificar_lock(self):
+        """Impede que dois agentes da mesma loja rodem ao mesmo tempo"""
+        self.lock_file = os.path.join(os.path.dirname(__file__), f"lock_{self.cnpj}.tmp")
+        if os.path.exists(self.lock_file):
+            try: os.remove(self.lock_file)
+            except: return True # Não conseguiu apagar, significa que está em uso
+        open(self.lock_file, 'w').write(str(os.getpid()))
+        return False
 
-        while self.is_running:
+    def setup_tray(self):
+        img = Image.open(resource_path("logo.ico"))
+        menu = (item('Abrir Painel', self.mostrar_janela), item('Sair', self.encerrar))
+        self.tray = pystray.Icon("BMSync", img, f"BM Sync - {self.cnpj}", menu)
+        threading.Thread(target=self.tray.run, daemon=True).start()
+
+    def adicionar_log(self, texto, erro=False):
+        timestamp = datetime.now().strftime("[%H:%M:%S]")
+        cor = " [ERRO] " if erro else " "
+        self.log_text.insert("end", f"{timestamp}{cor}{texto}\n")
+        self.log_text.see("end")
+
+    def rodar_sync(self):
+        agente_sync.configurar_estrutura_banco()
+        while True:
             try:
-                fez_algo = False
-                # Aqui chamamos as funções do seu arquivo original
-                if executar_ciclo_sync(): fez_algo = True #
-                if verificar_delecoes(): fez_algo = True #
-
-                if not fez_algo:
-                    time.sleep(30) # Delay ocioso
-                else:
-                    self.adicionar_log("Dados enviados com sucesso! ✅")
-                    time.sleep(1) # Delay entre lotes
+                if agente_sync.executar_ciclo_sync():
+                    self.adicionar_log("Dados sincronizados com sucesso.")
+                time.sleep(agente_sync.DELAY_OCIOSO)
             except Exception as e:
-                self.adicionar_log(f"ERRO: {str(e)}")
+                self.adicionar_log(f"Erro no ciclo: {e}", erro=True)
                 time.sleep(10)
 
+    def minimizar_para_tray(self): self.withdraw()
+    def mostrar_janela(self): self.deiconify()
+    def encerrar(self):
+        if os.path.exists(self.lock_file): os.remove(self.lock_file)
+        self.tray.stop()
+        self.quit()
+
 if __name__ == "__main__":
-    app = AgenteSyncGUI()
-    app.mainloop()
+    App().mainloop()
