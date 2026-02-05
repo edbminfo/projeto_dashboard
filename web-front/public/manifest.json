@@ -1,0 +1,21 @@
+{
+  "name": "BM Dashboard",
+  "short_name": "BM Dash",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f5f9",
+  "theme_color": "#696cff",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/img/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/img/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

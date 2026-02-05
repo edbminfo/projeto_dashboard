@@ -1,0 +1,22 @@
+version: "3.7"
+
+services:
+  ## --- SEU BANCO DE DADOS (JÁ EXISTENTE) ---
+
+
+  ## --- NOVO FRONT-END NODE.JS ---
+  front-dashboard:
+    build: . # <--- Caminho para a pasta onde está o Dockerfile do Node
+
+    environment:
+      # Conecta no banco usando o NOME DO SERVIÇO (db-dashboard) e a PORTA INTERNA (5432)
+      - DB_HOST=5.161.191.41 
+      - DB_PORT=5454
+      - DB_USER=postgres
+      - DB_PASS=0c2883a4c8ddd231d298da3708d93a8e
+      - DB_NAME=dashboard_multitenant
+      # Senha para o Webhook de Criar Usuário
+      - SENHA_ADMIN_SISTEMA=c45615f6-611d-44a3-9a38-f606f445de53
+      - API_INTERNAL_URL=https://api-dash.bmhelp.click/api     
+    ports:
+      - "3000:3000"
