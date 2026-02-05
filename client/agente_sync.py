@@ -13,9 +13,9 @@ DELAY_ENTRE_LOTES = 2   # Segundos entre envios para não sobrecarregar
 TIMEOUT_API = 60        # Timeout da requisição
 
 # --- VERSÃO ---
-VERSAO = "CLIENTE DASHBOARD"
+VERSAO = "CLIENTE DASHBOARD v1.0"
 
-print(f">> Iniciando Agente Sync v{VERSAO}...", flush=True)
+print(f">> {VERSAO}...", flush=True)
 
 # --- CARREGAMENTO CONFIG ---
 diretorio_base = os.path.dirname(os.path.abspath(__file__))

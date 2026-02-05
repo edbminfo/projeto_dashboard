@@ -1,0 +1,1 @@
+pyinstaller --noconsole --onefile --version-file=version_info.txt --icon=logo.ico --add-data "logo.ico;." --name="AgenteBM" agente_gui.py
