@@ -20,6 +20,12 @@ def verificar_admin(x_senha_admin: str = Header(..., alias="x-senha-admin")):
         raise HTTPException(status_code=403, detail="Acesso negado: Senha de Admin incorreta")
     return x_senha_admin
 
+
+# --- MODELO PARA REMOÇÃO DE VÍNCULO ---
+class UsuarioLojaSchema(BaseModel):
+    cnpj: str
+    telefone: str
+
 # --- MODELOS ---
 class LojaSchema(BaseModel):
     id: int
@@ -166,3 +172,85 @@ def criar_cliente(dados: NovoClienteSchema):
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally: conn.close()
+
+# --- NOVA ROTA 1: LISTAR USUÁRIOS POR CNPJ ---
+@router.get("/admin/usuarios-loja/{cnpj}", dependencies=[Depends(verificar_admin)])
+def listar_usuarios_por_cnpj(cnpj: str):
+    """
+    Lista todos os usuários vinculados a um CNPJ específico.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cnpj_limpo = re.sub(r'\D', '', cnpj)
+        
+        cursor.execute("""
+            SELECT u.id, u.nome, u.telefone 
+            FROM public.usuarios u
+            JOIN public.usuarios_lojas ul ON u.id = ul.usuario_id
+            JOIN public.lojas_sincronizadas l ON ul.loja_id = l.id
+            WHERE l.cnpj = %s
+        """, (cnpj_limpo,))
+        
+        resultados = cursor.fetchall()
+        
+        lista_usuarios = []
+        for linha in resultados:
+            lista_usuarios.append({
+                "id": linha[0],
+                "nome": linha[1],
+                "telefone": linha[2]
+            })
+            
+        return lista_usuarios
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+# --- NOVA ROTA 2: DESATIVAR (REMOVER) USUÁRIO DA LOJA ---
+@router.delete("/admin/remover-usuario-loja", dependencies=[Depends(verificar_admin)])
+def remover_usuario_da_loja(dados: UsuarioLojaSchema):
+    """
+    Remove o acesso de um usuário (telefone) a uma loja específica (CNPJ).
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cnpj_limpo = re.sub(r'\D', '', dados.cnpj)
+        fone_limpo = re.sub(r'\D', '', dados.telefone)
+
+        # Verifica se a loja existe
+        cursor.execute("SELECT id FROM public.lojas_sincronizadas WHERE cnpj = %s", (cnpj_limpo,))
+        loja = cursor.fetchone()
+        if not loja:
+            raise HTTPException(status_code=404, detail="Loja não encontrada")
+        id_loja = loja[0]
+
+        # Verifica se o usuário existe
+        cursor.execute("SELECT id FROM public.usuarios WHERE telefone = %s", (fone_limpo,))
+        usuario = cursor.fetchone()
+        if not usuario:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        id_usuario = usuario[0]
+
+        # Remove o vínculo
+        cursor.execute("""
+            DELETE FROM public.usuarios_lojas 
+            WHERE usuario_id = %s AND loja_id = %s
+        """, (id_usuario, id_loja))
+        
+        if cursor.rowcount == 0:
+             raise HTTPException(status_code=404, detail="Este usuário não estava vinculado a esta loja.")
+
+        conn.commit()
+        return {"status": "sucesso", "mensagem": f"Acesso do telefone {fone_limpo} removido da loja {cnpj_limpo}"}
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
