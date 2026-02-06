@@ -306,72 +306,12 @@ app.get('/painel', authGuard, async (req, res) => {
     }
 });
 
-app.get('/relatorios/:tipo', authGuard, async (req, res) => {
-    const { tipo } = req.params;
-    const { loja_id: lojaId, periodo, data_inicio, data_fim } = req.query;
 
-    if (!lojaId) return res.redirect('/');
-
-    // ... (Mantenha o objeto 'titulos' igual ao original aqui) ...
-    const titulos = { 'produto': 'Produtos', 'hora': 'Horários', 'dia': 'Dias', 'pagamento': 'Pagamentos', 'secao': 'Seção', 'grupo': 'Grupo', 'fabricante': 'Fabricante', 'fornecedor': 'Fornecedor', 'cliente': 'Clientes', 'terminal': 'Terminal', 'usuario': 'Usuário', 'vendedor': 'Vendedor' };
-
-    if (!titulos[tipo]) return res.status(400).render('error', { erro: null, message: `Tipo inválido: ${tipo}` });
-
-    try {
-        const [lojaRes, todasLojas] = await Promise.all([
-            // Verifica ativo na loja atual
-            pool.query("SELECT id, api_token, nome_fantasia, ativo FROM lojas_sincronizadas WHERE id = $1", [lojaId]),
-            // Filtra ativas na lista geral
-            pool.query(`
-                SELECT l.id, l.nome_fantasia 
-                FROM lojas_sincronizadas l 
-                JOIN usuarios_lojas ul ON l.id = ul.loja_id 
-                WHERE ul.usuario_id = $1 AND l.ativo = TRUE 
-                ORDER BY l.nome_fantasia ASC
-            `, [req.session.usuario.id])
-        ]);
-
-        // Se loja inativa ou inexistente -> redireciona para Home
-        if (lojaRes.rows.length === 0 || !lojaRes.rows[0].ativo) return res.redirect('/');
-
-        const lojaAtual = lojaRes.rows[0];
-        const filtroData = filtroDataExe(periodo, data_inicio, data_fim);
-        const urlApi = `${API_PYTHON_URL}/reports/ranking/${tipo}?data_inicio=${filtroData.data_inicio}&data_fim=${filtroData.data_fim}&limit=50`;
-
-        const respostaApi = await axios.get(urlApi, {
-            headers: { 'Authorization': `Bearer ${lojaAtual.api_token}` }
-        });
-
-        res.render('relatorio', {
-            tipo, tituloRelatorio: titulos[tipo], dados: respostaApi.data,
-            lojaId, lojaAtual, periodo: periodo || 'hoje',
-            dIni: filtroData.data_inicio, dFim: filtroData.data_fim,
-            todasLojas: todasLojas.rows, usuario: req.session.usuario
-        });
-
-    } catch (erro) {
-        console.error(`Erro relatório ${tipo}:`, erro.message);
-        res.status(500).render('error', { erro: erro, message: "Erro ao gerar relatório." });
-    }
-});
 // ==================================================================
 // 5. WEBHOOKS & INICIALIZAÇÃO
 // ==================================================================
 
-app.post('/webhook/criar-usuario', async (req, res) => {
-    const { nome, telefone, cnpjs, admin_secret } = req.body;
-    if (admin_secret !== SENHA_ADMIN_WEBHOOK) return res.status(401).json({ erro: "Não autorizado" });
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        const foneLimpo = telefone.replace(/\D/g, '');
-        const userRes = await client.query(`INSERT INTO usuarios (nome, telefone) VALUES ($1, $2) ON CONFLICT (telefone) DO UPDATE SET nome = EXCLUDED.nome RETURNING id;`, [nome, foneLimpo]);
-        const userId = userRes.rows[0].id;
-        const lojasRes = await client.query(`SELECT id FROM lojas_sincronizadas WHERE cnpj = ANY($1::text[])`, [cnpjs]);
-        for (let loja of lojasRes.rows) { await client.query(`INSERT INTO usuarios_lojas (usuario_id, loja_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [userId, loja.id]); }
-        await client.query('COMMIT'); res.json({ status: "sucesso" });
-    } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ erro: "Erro interno" }); } finally { client.release(); }
-});
+
 
 async function initDb() {
     try {
