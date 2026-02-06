@@ -234,7 +234,14 @@ app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login')
 
 app.get('/', authGuard, async (req, res) => {
     try {
-        const query = `SELECT l.id FROM lojas_sincronizadas l JOIN usuarios_lojas ul ON l.id = ul.loja_id WHERE ul.usuario_id = $1 ORDER BY l.id ASC LIMIT 1`;
+        // CORREÇÃO: Adicionado "AND l.ativo = TRUE" para ignorar empresas desativadas
+        const query = `
+            SELECT l.id 
+            FROM lojas_sincronizadas l 
+            JOIN usuarios_lojas ul ON l.id = ul.loja_id 
+            WHERE ul.usuario_id = $1 AND l.ativo = TRUE 
+            ORDER BY l.id ASC LIMIT 1
+        `;
         const result = await pool.query(query, [req.session.usuario.id]);
 
         if (result.rows.length > 0) {
@@ -242,15 +249,14 @@ app.get('/', authGuard, async (req, res) => {
         } else {
             res.status(403).render('error', {
                 erro: null,
-                message: "Nenhuma empresa vinculada ao seu usuário. Entre em contato com o administrador do sistema."
+                message: "Nenhuma empresa ativa vinculada ao seu usuário. Entre em contato com o suporte."
             });
         }
     } catch (erro) {
         console.error(erro);
-
         res.status(500).render('error', {
             erro: erro,
-            message: "Não foi possível carregar o painel inicial. Tente novamente mais tarde ou contate o suporte."
+            message: "Não foi possível carregar o painel inicial."
         });
     }
 });
@@ -262,9 +268,20 @@ app.get('/painel', authGuard, async (req, res) => {
     if (!lojaId) return res.redirect('/');
 
     try {
-        const todasLojas = await pool.query(`SELECT l.id, l.nome_fantasia FROM lojas_sincronizadas l JOIN usuarios_lojas ul ON l.id = ul.loja_id WHERE ul.usuario_id = $1 ORDER BY l.nome_fantasia ASC`, [req.session.usuario.id]);
-        const lojaRes = await pool.query("SELECT api_token, nome_fantasia FROM lojas_sincronizadas WHERE id = $1", [lojaId]);
-        if (lojaRes.rows.length === 0) return res.redirect('/');
+        // 1. Busca lista de lojas APENAS ATIVAS para o menu
+        const todasLojas = await pool.query(`
+            SELECT l.id, l.nome_fantasia 
+            FROM lojas_sincronizadas l 
+            JOIN usuarios_lojas ul ON l.id = ul.loja_id 
+            WHERE ul.usuario_id = $1 AND l.ativo = TRUE 
+            ORDER BY l.nome_fantasia ASC
+        `, [req.session.usuario.id]);
+
+        // 2. Verifica se a loja atual é válida e está ativa
+        const lojaRes = await pool.query("SELECT api_token, nome_fantasia, ativo FROM lojas_sincronizadas WHERE id = $1", [lojaId]);
+        
+        // Se não achar a loja ou ela estiver inativa, joga o usuário de volta para o início (que vai achar uma ativa)
+        if (lojaRes.rows.length === 0 || !lojaRes.rows[0].ativo) return res.redirect('/');
 
         const { api_token, nome_fantasia: nomeLoja } = lojaRes.rows[0];
 
@@ -272,7 +289,6 @@ app.get('/painel', authGuard, async (req, res) => {
         dIni = filtroData.data_inicio;
         dFim = filtroData.data_fim;
 
-        // CHAMADA AO BACKEND PYTHON PARA OBTER OS CARDS CALCULADOS
         const urlApi = `${API_PYTHON_URL}/reports/dashboard-cards?data_inicio=${dIni}&data_fim=${dFim}`;
         const respostaApi = await axios.get(urlApi, {
             headers: { 'Authorization': `Bearer ${api_token}` }
@@ -286,11 +302,7 @@ app.get('/painel', authGuard, async (req, res) => {
 
     } catch (erro) {
         console.error(erro);
-
-        res.status(500).render('error', {
-            erro: erro,
-            message: "Não foi possível carregar o painel inical, tente novamente mais tarde ou entre em contato com o suporte."
-        });
+        res.status(500).render('error', { erro: erro, message: "Erro ao carregar painel." });
     }
 });
 
@@ -300,77 +312,46 @@ app.get('/relatorios/:tipo', authGuard, async (req, res) => {
 
     if (!lojaId) return res.redirect('/');
 
-    const titulos = {
-        'produto': 'Produtos',
-        'hora': 'Horários',
-        'dia': 'Dias',
-        'pagamento': 'Pagamentos',
-        'secao': 'Seção',
-        'grupo': 'Grupo',
-        'fabricante': 'Fabricante',
-        'fornecedor': 'Fornecedor',
-        'cliente': 'Clientes',
-        'terminal': 'Terminal',
-        'usuario': 'Usuário',
-        'vendedor': 'Vendedor'
-    };
+    // ... (Mantenha o objeto 'titulos' igual ao original aqui) ...
+    const titulos = { 'produto': 'Produtos', 'hora': 'Horários', 'dia': 'Dias', 'pagamento': 'Pagamentos', 'secao': 'Seção', 'grupo': 'Grupo', 'fabricante': 'Fabricante', 'fornecedor': 'Fornecedor', 'cliente': 'Clientes', 'terminal': 'Terminal', 'usuario': 'Usuário', 'vendedor': 'Vendedor' };
 
-    if (!titulos[tipo]) {
-        return res.status(400).render('error', {
-            erro: null,
-            message: `Tipo de relatório inválido: ${tipo}`
-        });
-    }
+    if (!titulos[tipo]) return res.status(400).render('error', { erro: null, message: `Tipo inválido: ${tipo}` });
 
     try {
         const [lojaRes, todasLojas] = await Promise.all([
-            pool.query("SELECT id, api_token, nome_fantasia FROM lojas_sincronizadas WHERE id = $1", [lojaId]),
-            pool.query(`SELECT l.id, l.nome_fantasia FROM lojas_sincronizadas l 
-                        JOIN usuarios_lojas ul ON l.id = ul.loja_id 
-                        WHERE ul.usuario_id = $1 ORDER BY l.nome_fantasia ASC`, [req.session.usuario.id])
+            // Verifica ativo na loja atual
+            pool.query("SELECT id, api_token, nome_fantasia, ativo FROM lojas_sincronizadas WHERE id = $1", [lojaId]),
+            // Filtra ativas na lista geral
+            pool.query(`
+                SELECT l.id, l.nome_fantasia 
+                FROM lojas_sincronizadas l 
+                JOIN usuarios_lojas ul ON l.id = ul.loja_id 
+                WHERE ul.usuario_id = $1 AND l.ativo = TRUE 
+                ORDER BY l.nome_fantasia ASC
+            `, [req.session.usuario.id])
         ]);
 
-        if (lojaRes.rows.length === 0) return res.redirect('/');
+        // Se loja inativa ou inexistente -> redireciona para Home
+        if (lojaRes.rows.length === 0 || !lojaRes.rows[0].ativo) return res.redirect('/');
 
         const lojaAtual = lojaRes.rows[0];
-
         const filtroData = filtroDataExe(periodo, data_inicio, data_fim);
-        const dIni = filtroData.data_inicio;
-        const dFim = filtroData.data_fim;
-
-        const urlApi = `${API_PYTHON_URL}/reports/ranking/${tipo}?data_inicio=${dIni}&data_fim=${dFim}&limit=50`;
+        const urlApi = `${API_PYTHON_URL}/reports/ranking/${tipo}?data_inicio=${filtroData.data_inicio}&data_fim=${filtroData.data_fim}&limit=50`;
 
         const respostaApi = await axios.get(urlApi, {
-            headers: { 'Authorization': `Bearer ${lojaAtual.api_token}` },
-            // timeout: 10000
+            headers: { 'Authorization': `Bearer ${lojaAtual.api_token}` }
         });
 
         res.render('relatorio', {
-            tipo,
-            tituloRelatorio: titulos[tipo],
-            dados: respostaApi.data,
-            lojaId,
-            lojaAtual,
-            periodo: periodo || 'hoje',
-            dIni,
-            dFim,
-            todasLojas: todasLojas.rows,
-            usuario: req.session.usuario
+            tipo, tituloRelatorio: titulos[tipo], dados: respostaApi.data,
+            lojaId, lojaAtual, periodo: periodo || 'hoje',
+            dIni: filtroData.data_inicio, dFim: filtroData.data_fim,
+            todasLojas: todasLojas.rows, usuario: req.session.usuario
         });
 
     } catch (erro) {
-        console.error(`Erro na rota /relatorios/${tipo}:`, erro.message);
-
-        let mensagemUsuario = "Não conseguimos processar os dados do relatório agora. Por favor, tente atualizar a página ou refaça o filtro.";
-
-        if (erro.code === 'ECONNABORTED' || erro.code === 'ETIMEDOUT') {
-            mensagemUsuario = "O relatório está demorando muito para ser gerado. Tente selecionar um período de datas menor.";
-        }
-
-        res.status(500).render('error', {
-            erro: erro, 
-            message: mensagemUsuario
-        });
+        console.error(`Erro relatório ${tipo}:`, erro.message);
+        res.status(500).render('error', { erro: erro, message: "Erro ao gerar relatório." });
     }
 });
 // ==================================================================
