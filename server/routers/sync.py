@@ -91,6 +91,52 @@ def deletar_venda(dados: DeleteVendaSchema, schema: str = Depends(validar_token)
         raise HTTPException(status_code=500, detail=str(e))
     finally: conn.close()
 
+
+# Adicione ao final de server/routers/sync.py
+
+@router.get("/sync/ultimos-ids")
+def get_ultimos_ids(schema: str = Depends(validar_token)):
+    """
+    Retorna o maior id_original de cada tabela para controle de sincronização.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Lista de tabelas para verificar
+    tabelas = [
+        'saida', 'saida_produto', 'saida_formapag', 
+        'cliente', 'vendedor', 'usuario_pdv', 
+        'produto', 'grupo', 'secao', 
+        'fabricante', 'familia', 'formapag'
+    ]
+    
+    resultado = {}
+
+    try:
+        for tabela in tabelas:
+            # 1. Verifica se a tabela existe no schema
+            cursor.execute(f"SELECT to_regclass('{schema}.{tabela}')")
+            if cursor.fetchone()[0]:
+                # 2. Busca o maior ID (MAX)
+                # OBS: Se seus IDs forem numéricos mas salvos como texto, 
+                # a ordenação pode ser alfabética (ex: '10' < '2'). 
+                # Se for esse o caso, avise para ajustarmos o cast.
+                cursor.execute(f"SELECT MAX(id_original) FROM {schema}.{tabela}")
+                max_id = cursor.fetchone()[0]
+                resultado[tabela] = max_id if max_id is not None else "0"
+            else:
+                # Tabela ainda não criada
+                resultado[tabela] = "0"
+        
+        return resultado
+
+    except Exception as e:
+        print(f"Erro ao buscar ultimos IDs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 # --- ROTAS DE CADASTRO ---
 @router.post("/sync/cadastros/produto")
 async def sync_produto(request: Request, schema: str = Depends(validar_token)): 
