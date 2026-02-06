@@ -42,10 +42,30 @@ app.use(session({
 // ==================================================================
 
 function gerarToken() { return Math.floor(100000 + Math.random() * 900000).toString(); }
-function authGuard(req, res, next) { if (req.session.usuario) return next(); res.redirect('/login'); }
+
+// --- AUTH GUARD: COM VERIFICAÇÃO DE SESSÃO ÚNICA ---
+async function authGuard(req, res, next) {
+    if (!req.session.usuario) return res.redirect('/login');
+
+    try {
+        // Busca o token atual salvo no banco para este usuário
+        const result = await pool.query("SELECT token_sessao FROM usuarios WHERE id = $1", [req.session.usuario.id]);
+        
+        // Se o usuário foi deletado ou o token mudou (logou em outro lugar)
+        if (result.rows.length === 0 || result.rows[0].token_sessao !== req.session.usuario.token_sessao) {
+            req.session.destroy(); // Mata a sessão antiga
+            return res.render('login', { erro: "Você conectou em outro dispositivo. Faça login novamente." });
+        }
+        
+        next();
+    } catch (erro) {
+        console.error("Erro authGuard:", erro);
+        res.redirect('/login');
+    }
+}
+
 function filtroDataExe(periodo, data_inicio, data_fim) {
     const hoje = new Date();
-
     const formatarData = (data) => {
         const ano = data.getFullYear();
         const mes = String(data.getMonth() + 1).padStart(2, '0');
@@ -57,108 +77,22 @@ function filtroDataExe(periodo, data_inicio, data_fim) {
     let dFim = formatarData(hoje);
 
     switch (periodo) {
-
-        case 'personalizado':
-            if (data_inicio && data_fim) {
-                dIni = data_inicio;
-                dFim = data_fim;
-            }
-            break;
-
-        case 'ontem':
-            const ontem = new Date(hoje);
-            ontem.setDate(hoje.getDate() - 1);
-            dIni = formatarData(ontem);
-            dFim = formatarData(ontem);
-            break;
-
-        case '7dias':
-            const fim7 = new Date(hoje);
-            fim7.setDate(hoje.getDate() - 1);
-            dFim = formatarData(fim7);
-
-            const ini7 = new Date(hoje);
-            ini7.setDate(hoje.getDate() - 7);
-            dIni = formatarData(ini7);
-            break;
-
-        case '15dias':
-            const fim15 = new Date(hoje);
-            fim15.setDate(hoje.getDate() - 1);
-            dFim = formatarData(fim15);
-
-            const ini15 = new Date(hoje);
-            ini15.setDate(hoje.getDate() - 15);
-            dIni = formatarData(ini15);
-            break;
-
-        case '30dias':
-            const fim30 = new Date(hoje);
-            fim30.setDate(hoje.getDate() - 1);
-            dFim = formatarData(fim30);
-
-            const ini30 = new Date(hoje);
-            ini30.setDate(hoje.getDate() - 30);
-            dIni = formatarData(ini30);
-            break;
-
-        case 'mes':
-            dIni = formatarData(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
-            dFim = formatarData(hoje);
-            break;
-
-        case 'mes_passado':
-            dIni = formatarData(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1));
-            dFim = formatarData(new Date(hoje.getFullYear(), hoje.getMonth(), 0));
-            break;
-
-        case '3meses':
-            const fim90 = new Date(hoje);
-            fim90.setDate(hoje.getDate() - 1);
-            dFim = formatarData(fim90);
-
-            const ini90 = new Date(hoje);
-            ini90.setDate(hoje.getDate() - 90);
-            dIni = formatarData(ini90);
-            break;
-
-        case '6meses':
-            const fim180 = new Date(hoje);
-            fim180.setDate(hoje.getDate() - 1);
-            dFim = formatarData(fim180);
-
-            const ini180 = new Date(hoje);
-            ini180.setDate(hoje.getDate() - 180);
-            dIni = formatarData(ini180);
-            break;
-
-        case 'este_ano':
-            dIni = formatarData(new Date(hoje.getFullYear(), 0, 1));
-            dFim = formatarData(hoje);
-            break;
-
-        case 'ano_passado':
-            dIni = formatarData(new Date(hoje.getFullYear() - 1, 0, 1));
-            dFim = formatarData(new Date(hoje.getFullYear() - 1, 11, 31));
-            break;
-
-        case 'hoje':
-        default:
-            dIni = formatarData(hoje);
-            dFim = formatarData(hoje);
-            break;
+        case 'personalizado': if (data_inicio && data_fim) { dIni = data_inicio; dFim = data_fim; } break;
+        case 'ontem': const ontem = new Date(hoje); ontem.setDate(hoje.getDate() - 1); dIni = formatarData(ontem); dFim = formatarData(ontem); break;
+        case '7dias': const fim7 = new Date(hoje); fim7.setDate(hoje.getDate() - 1); dFim = formatarData(fim7); const ini7 = new Date(hoje); ini7.setDate(hoje.getDate() - 7); dIni = formatarData(ini7); break;
+        case '15dias': const fim15 = new Date(hoje); fim15.setDate(hoje.getDate() - 1); dFim = formatarData(fim15); const ini15 = new Date(hoje); ini15.setDate(hoje.getDate() - 15); dIni = formatarData(ini15); break;
+        case '30dias': const fim30 = new Date(hoje); fim30.setDate(hoje.getDate() - 1); dFim = formatarData(fim30); const ini30 = new Date(hoje); ini30.setDate(hoje.getDate() - 30); dIni = formatarData(ini30); break;
+        case 'mes': dIni = formatarData(new Date(hoje.getFullYear(), hoje.getMonth(), 1)); dFim = formatarData(hoje); break;
+        case 'mes_passado': dIni = formatarData(new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1)); dFim = formatarData(new Date(hoje.getFullYear(), hoje.getMonth(), 0)); break;
+        case '3meses': const fim90 = new Date(hoje); fim90.setDate(hoje.getDate() - 1); dFim = formatarData(fim90); const ini90 = new Date(hoje); ini90.setDate(hoje.getDate() - 90); dIni = formatarData(ini90); break;
+        case '6meses': const fim180 = new Date(hoje); fim180.setDate(hoje.getDate() - 1); dFim = formatarData(fim180); const ini180 = new Date(hoje); ini180.setDate(hoje.getDate() - 180); dIni = formatarData(ini180); break;
+        case 'este_ano': dIni = formatarData(new Date(hoje.getFullYear(), 0, 1)); dFim = formatarData(hoje); break;
+        case 'ano_passado': dIni = formatarData(new Date(hoje.getFullYear() - 1, 0, 1)); dFim = formatarData(new Date(hoje.getFullYear() - 1, 11, 31)); break;
+        case 'hoje': default: dIni = formatarData(hoje); dFim = formatarData(hoje); break;
     }
-
-    // console.log('Periodo: ', periodo);
-    // console.log('Data Inicial: ', dIni);
-    // console.log('Data Final: ', dFim);
-    // console.log('==================================================================');
-
-    return {
-        data_inicio: dIni,
-        data_fim: dFim,
-    };
+    return { data_inicio: dIni, data_fim: dFim };
 }
+
 // ==================================================================
 // 3. ROTAS DE AUTENTICAÇÃO
 // ==================================================================
@@ -201,14 +135,11 @@ app.get('/verificar', (req, res) => {
         res.render('verificar', { telefone: req.session.temp_telefone, erro: null, horaServidor });
     } catch (erro) {
         console.error(erro);
-
-        res.status(500).render('error', {
-            erro: erro,
-            message: "Não foi possível carregar a tela de verificação, tente novamente mais tarde ou entre em contato com o suporte."
-        });
+        res.status(500).render('error', { erro: erro, message: "Erro ao carregar verificação." });
     }
 });
 
+// --- ROTA DE VALIDAÇÃO: GERA TOKEN DE SESSÃO ÚNICA ---
 app.post('/auth/validar', async (req, res) => {
     const { codigo } = req.body;
     const telefone = req.session.temp_telefone;
@@ -220,8 +151,18 @@ app.post('/auth/validar', async (req, res) => {
         if (new Date() > new Date(sessao.expira_em)) return res.render('verificar', { telefone, erro: "Código expirado.", horaServidor: new Date().toLocaleString() });
 
         await pool.query("UPDATE sessoes_login SET usado = TRUE WHERE id = $1", [sessao.id]);
-        const user = await pool.query("SELECT * FROM usuarios WHERE telefone = $1", [telefone]);
-        req.session.usuario = user.rows[0];
+        
+        // GERA NOVO TOKEN DE SESSÃO E SALVA NO BANCO (Deslogando outros dispositivos)
+        const tokenSessaoUnica = Math.random().toString(36).substring(2) + Date.now().toString(36);
+        
+        const userUpdate = await pool.query(`
+            UPDATE usuarios 
+            SET token_sessao = $1 
+            WHERE telefone = $2 
+            RETURNING *
+        `, [tokenSessaoUnica, telefone]);
+
+        req.session.usuario = userUpdate.rows[0];
         res.redirect('/');
     } catch (erro) { console.error(erro); res.redirect('/login'); }
 });
@@ -229,12 +170,12 @@ app.post('/auth/validar', async (req, res) => {
 app.get('/logout', (req, res) => { req.session.destroy(); res.redirect('/login'); });
 
 // ==================================================================
-// 4. ROTAS DO DASHBOARD (O BACKEND PROCESSA OS DADOS)
+// 4. ROTAS DO DASHBOARD
 // ==================================================================
 
+// --- ROTA RAIZ (Com Filtro de Ativo) ---
 app.get('/', authGuard, async (req, res) => {
     try {
-        // CORREÇÃO: Adicionado "AND l.ativo = TRUE" para ignorar empresas desativadas
         const query = `
             SELECT l.id 
             FROM lojas_sincronizadas l 
@@ -247,20 +188,15 @@ app.get('/', authGuard, async (req, res) => {
         if (result.rows.length > 0) {
             res.redirect(`/painel?loja_id=${result.rows[0].id}`);
         } else {
-            res.status(403).render('error', {
-                erro: null,
-                message: "Nenhuma empresa ativa vinculada ao seu usuário. Entre em contato com o suporte."
-            });
+            res.status(403).render('error', { erro: null, message: "Nenhuma empresa ativa vinculada ao seu usuário." });
         }
     } catch (erro) {
         console.error(erro);
-        res.status(500).render('error', {
-            erro: erro,
-            message: "Não foi possível carregar o painel inicial."
-        });
+        res.status(500).render('error', { erro: erro, message: "Erro ao carregar painel inicial." });
     }
 });
 
+// --- PAINEL (Com Filtro de Ativo) ---
 app.get('/painel', authGuard, async (req, res) => {
     const lojaId = req.query.loja_id;
     const periodo = req.query.periodo || 'hoje';
@@ -268,7 +204,6 @@ app.get('/painel', authGuard, async (req, res) => {
     if (!lojaId) return res.redirect('/');
 
     try {
-        // 1. Busca lista de lojas APENAS ATIVAS para o menu
         const todasLojas = await pool.query(`
             SELECT l.id, l.nome_fantasia 
             FROM lojas_sincronizadas l 
@@ -277,41 +212,78 @@ app.get('/painel', authGuard, async (req, res) => {
             ORDER BY l.nome_fantasia ASC
         `, [req.session.usuario.id]);
 
-        // 2. Verifica se a loja atual é válida e está ativa
         const lojaRes = await pool.query("SELECT api_token, nome_fantasia, ativo FROM lojas_sincronizadas WHERE id = $1", [lojaId]);
-        
-        // Se não achar a loja ou ela estiver inativa, joga o usuário de volta para o início (que vai achar uma ativa)
         if (lojaRes.rows.length === 0 || !lojaRes.rows[0].ativo) return res.redirect('/');
 
         const { api_token, nome_fantasia: nomeLoja } = lojaRes.rows[0];
-
         const filtroData = filtroDataExe(periodo, data_inicio, data_fim);
-        dIni = filtroData.data_inicio;
-        dFim = filtroData.data_fim;
-
-        const urlApi = `${API_PYTHON_URL}/reports/dashboard-cards?data_inicio=${dIni}&data_fim=${dFim}`;
-        const respostaApi = await axios.get(urlApi, {
-            headers: { 'Authorization': `Bearer ${api_token}` }
-        });
+        
+        const urlApi = `${API_PYTHON_URL}/reports/dashboard-cards?data_inicio=${filtroData.data_inicio}&data_fim=${filtroData.data_fim}`;
+        const respostaApi = await axios.get(urlApi, { headers: { 'Authorization': `Bearer ${api_token}` } });
 
         res.render('relatorio', {
-            modo: 'painel',
-            dados: respostaApi.data,
-            lojaId, nomeLoja, periodo, dIni, dFim, todasLojas: todasLojas.rows, usuario: req.session.usuario
+            modo: 'painel', dados: respostaApi.data,
+            lojaId, nomeLoja, periodo, dIni: filtroData.data_inicio, dFim: filtroData.data_fim, 
+            todasLojas: todasLojas.rows, usuario: req.session.usuario
         });
-
     } catch (erro) {
         console.error(erro);
         res.status(500).render('error', { erro: erro, message: "Erro ao carregar painel." });
     }
 });
 
+// --- RELATÓRIOS (Com Filtro de Ativo) ---
+app.get('/relatorios/:tipo', authGuard, async (req, res) => {
+    const { tipo } = req.params;
+    const { loja_id: lojaId, periodo, data_inicio, data_fim } = req.query;
+
+    if (!lojaId) return res.redirect('/');
+
+    const titulos = {
+        'produto': 'Produtos', 'hora': 'Horários', 'dia': 'Dias', 'pagamento': 'Pagamentos',
+        'secao': 'Seção', 'grupo': 'Grupo', 'fabricante': 'Fabricante', 'fornecedor': 'Fornecedor',
+        'cliente': 'Clientes', 'terminal': 'Terminal', 'usuario': 'Usuário', 'vendedor': 'Vendedor'
+    };
+
+    if (!titulos[tipo]) return res.status(400).render('error', { erro: null, message: `Tipo inválido: ${tipo}` });
+
+    try {
+        const [lojaRes, todasLojas] = await Promise.all([
+            pool.query("SELECT id, api_token, nome_fantasia, ativo FROM lojas_sincronizadas WHERE id = $1", [lojaId]),
+            pool.query(`
+                SELECT l.id, l.nome_fantasia 
+                FROM lojas_sincronizadas l 
+                JOIN usuarios_lojas ul ON l.id = ul.loja_id 
+                WHERE ul.usuario_id = $1 AND l.ativo = TRUE 
+                ORDER BY l.nome_fantasia ASC
+            `, [req.session.usuario.id])
+        ]);
+
+        if (lojaRes.rows.length === 0 || !lojaRes.rows[0].ativo) return res.redirect('/');
+
+        const lojaAtual = lojaRes.rows[0];
+        const filtroData = filtroDataExe(periodo, data_inicio, data_fim);
+        const urlApi = `${API_PYTHON_URL}/reports/ranking/${tipo}?data_inicio=${filtroData.data_inicio}&data_fim=${filtroData.data_fim}&limit=50`;
+
+        const respostaApi = await axios.get(urlApi, { headers: { 'Authorization': `Bearer ${lojaAtual.api_token}` } });
+
+        res.render('relatorio', {
+            tipo, tituloRelatorio: titulos[tipo], dados: respostaApi.data,
+            lojaId, lojaAtual, periodo: periodo || 'hoje', dIni: filtroData.data_inicio, dFim: filtroData.data_fim,
+            todasLojas: todasLojas.rows, usuario: req.session.usuario
+        });
+
+    } catch (erro) {
+        console.error(`Erro relatório ${tipo}:`, erro.message);
+        res.status(500).render('error', { erro: erro, message: "Erro ao gerar relatório." });
+    }
+});
 
 // ==================================================================
-// 5. WEBHOOKS & INICIALIZAÇÃO
+// 5. INICIALIZAÇÃO
 // ==================================================================
 
-
+// Nota: A rota de webhook antiga foi removida daqui, pois agora está no Backend (Python).
 
 async function initDb() {
     try {
@@ -320,11 +292,15 @@ async function initDb() {
         await client.query(`CREATE TABLE IF NOT EXISTS usuarios (id SERIAL PRIMARY KEY, nome VARCHAR(100), telefone VARCHAR(20) UNIQUE, criado_em TIMESTAMP DEFAULT NOW());`);
         await client.query(`CREATE TABLE IF NOT EXISTS sessoes_login (id SERIAL PRIMARY KEY, telefone VARCHAR(20), token_acesso VARCHAR(6), expira_em TIMESTAMP, usado BOOLEAN DEFAULT FALSE);`);
         await client.query(`CREATE TABLE IF NOT EXISTS usuarios_lojas (usuario_id INT REFERENCES usuarios(id), loja_id INT REFERENCES lojas_sincronizadas(id), PRIMARY KEY (usuario_id, loja_id));`);
+        
+        // CRIA COLUNA PARA SESSÃO ÚNICA SE NÃO EXISTIR
+        try {
+            await client.query(`ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS token_sessao VARCHAR(100);`);
+        } catch (e) {}
+
         client.release();
         console.log("✅ Banco OK");
     } catch (e) { console.error("❌ Erro Banco:", e.message); setTimeout(initDb, 5000); }
 }
-
-
 
 initDb().then(() => app.listen(PORT, () => console.log(`🚀 Front rodando na porta ${PORT}`)));
